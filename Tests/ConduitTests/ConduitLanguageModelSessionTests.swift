@@ -17,12 +17,18 @@ private actor CompatibilityProvider: AIProvider, @preconcurrency TextGenerator {
 
     private var queuedResults: [GenerationResult]
     private var streamedChunks: [String]
+    private var streamedChunkBatches: [[GenerationChunk]]
     private(set) var receivedMessages: [[Message]] = []
     private(set) var receivedConfigs: [GenerateConfig] = []
 
-    init(results: [GenerationResult], streamedChunks: [String] = []) {
+    init(
+        results: [GenerationResult],
+        streamedChunks: [String] = [],
+        streamedChunkBatches: [[GenerationChunk]] = []
+    ) {
         self.queuedResults = results
         self.streamedChunks = streamedChunks
+        self.streamedChunkBatches = streamedChunkBatches
     }
 
     var isAvailable: Bool { true }
@@ -71,14 +77,20 @@ private actor CompatibilityProvider: AIProvider, @preconcurrency TextGenerator {
         AsyncThrowingStream { continuation in
             Task {
                 await self.record(messages: messages)
-                let chunks = await self.currentStreamedChunks()
-                for (index, chunk) in chunks.enumerated() {
-                    continuation.yield(GenerationChunk(
-                        text: chunk,
-                        tokenCount: 0,
-                        isComplete: index == chunks.count - 1,
-                        finishReason: index == chunks.count - 1 ? .stop : nil
-                    ))
+                if let batch = await self.nextStreamedChunkBatch() {
+                    for chunk in batch {
+                        continuation.yield(chunk)
+                    }
+                } else {
+                    let chunks = await self.currentStreamedChunks()
+                    for (index, chunk) in chunks.enumerated() {
+                        continuation.yield(GenerationChunk(
+                            text: chunk,
+                            tokenCount: 0,
+                            isComplete: index == chunks.count - 1,
+                            finishReason: index == chunks.count - 1 ? .stop : nil
+                        ))
+                    }
                 }
                 continuation.finish()
             }
@@ -93,6 +105,11 @@ private actor CompatibilityProvider: AIProvider, @preconcurrency TextGenerator {
 
     private func currentStreamedChunks() -> [String] {
         streamedChunks
+    }
+
+    private func nextStreamedChunkBatch() -> [GenerationChunk]? {
+        guard !streamedChunkBatches.isEmpty else { return nil }
+        return streamedChunkBatches.removeFirst()
     }
 
     func configs() -> [GenerateConfig] {
@@ -264,6 +281,54 @@ struct ConduitLanguageModelSessionTests {
         #expect(last?.content.name == "Ava")
         #expect(last?.content.age == 31)
         #expect(session.transcript.count == 2)
+    }
+
+    @Test("streamResponse(to:) executes tools and mirrors tool transcript entries")
+    func streamResponseExecutesToolsAndUpdatesTranscript() async throws {
+        let toolCall = try Transcript.ToolCall(
+            id: "call-1",
+            toolName: "weather",
+            argumentsJSON: #"{"city":"SF"}"#
+        )
+        let provider = CompatibilityProvider(
+            results: [],
+            streamedChunkBatches: [
+                [
+                    GenerationChunk(
+                        text: "",
+                        isComplete: true,
+                        finishReason: .toolCalls,
+                        completedToolCalls: [toolCall]
+                    )
+                ],
+                [
+                    GenerationChunk(
+                        text: "It is clear.",
+                        isComplete: true,
+                        finishReason: .stop
+                    )
+                ]
+            ]
+        )
+        let model = ConduitLanguageModel(
+            provider: .custom(provider, mapModel: { _ in .openAI("test-model") }),
+            model: .openAI("test-model")
+        )
+        let session = try ConduitLanguageModelSession(
+            model: model,
+            tools: [CompatibilityWeatherTool()]
+        )
+
+        let stream = session.streamResponse(to: "Check weather")
+        var finalText = ""
+        for try await snapshot in stream {
+            finalText = snapshot.content
+        }
+
+        #expect(finalText == "It is clear.")
+        #expect(session.transcript.contains { if case .toolCalls = $0 { true } else { false } })
+        #expect(session.transcript.contains { if case .toolOutput = $0 { true } else { false } })
+        #expect(session.transcript.contains { if case .response = $0 { true } else { false } })
     }
 
     @Test("canonical Session exposes streaming events")

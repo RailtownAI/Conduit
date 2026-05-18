@@ -99,6 +99,36 @@ struct OllamaProviderTests {
         #expect(function["parameters"] != nil)
     }
 
+    @Test("chat body preserves assistant tool calls and tool outputs")
+    func nativeChatBodyPreservesToolHistory() throws {
+        let provider = OllamaProvider(configuration: .init(baseURL: URL(string: "http://localhost:11434/api")!))
+        let call = try Transcript.ToolCall(
+            id: "call-weather",
+            toolName: "weather",
+            argumentsJSON: #"{"city":"SF"}"#
+        )
+
+        let body = provider.buildChatBody(
+            messages: [
+                .user("Weather?"),
+                .assistant("", toolCalls: [call]),
+                .toolOutput(call: call, content: "Clear")
+            ],
+            model: .openAI("llama3.2"),
+            config: .default,
+            stream: false
+        )
+
+        let messages = try #require(body["messages"] as? [[String: Any]])
+        let assistant = messages[1]
+        let toolCalls = try #require(assistant["tool_calls"] as? [[String: Any]])
+        let function = try #require(toolCalls.first?["function"] as? [String: Any])
+        #expect(function["name"] as? String == "weather")
+        #expect((function["arguments"] as? [String: Any])?["city"] as? String == "SF")
+        #expect(messages[2]["role"] as? String == "tool")
+        #expect(messages[2]["tool_name"] as? String == "weather")
+    }
+
     @Test("native model list and show responses parse diagnostics")
     func modelMetadataParsing() throws {
         let provider = OllamaProvider(configuration: .init(baseURL: URL(string: "http://localhost:11434/api")!))
@@ -174,6 +204,62 @@ struct OllamaProviderTests {
         #expect(chunk.isComplete == true)
         #expect(chunk.finishReason == .maxTokens)
         #expect(chunk.usage?.completionTokens == 16)
+    }
+
+    @Test("chat responses parse native tool calls")
+    func chatResponseParsesToolCalls() throws {
+        let provider = OllamaProvider(configuration: .init(baseURL: URL(string: "http://localhost:11434/api")!))
+
+        let result = try provider.parseChatResponse(Data("""
+        {
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "weather",
+                  "arguments": { "city": "SF" }
+                }
+              }
+            ]
+          },
+          "done": true,
+          "done_reason": "stop"
+        }
+        """.utf8))
+
+        #expect(result.finishReason == .toolCalls)
+        #expect(result.toolCalls.count == 1)
+        #expect(result.toolCalls.first?.toolName == "weather")
+        #expect(result.toolCalls.first?.argumentsString.contains(#""city":"SF""#) == true)
+    }
+
+    @Test("streaming chat chunks expose completed native tool calls")
+    func streamChunkParsesToolCalls() throws {
+        let provider = OllamaProvider(configuration: .init(baseURL: URL(string: "http://localhost:11434/api")!))
+
+        let chunk = try provider.parseChatStreamChunk(Data("""
+        {
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "weather",
+                  "arguments": { "city": "SF" }
+                }
+              }
+            ]
+          },
+          "done": true
+        }
+        """.utf8))
+
+        #expect(chunk.isComplete == true)
+        #expect(chunk.finishReason == .toolCalls)
+        #expect(chunk.completedToolCalls?.first?.toolName == "weather")
     }
 
     @Test("requests carry configured timeout for streaming and pull paths")

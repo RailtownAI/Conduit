@@ -327,17 +327,7 @@ public actor OllamaProvider: AIProvider, TextGenerator {
     ) -> [String: Any] {
         var body: [String: Any] = [
             "model": model.rawValue,
-            "messages": messages.map { message in
-                var serialized: [String: Any] = [
-                    "role": message.role.rawValue,
-                    "content": message.content.textValue
-                ]
-                let images = imagePayloads(from: message.content)
-                if !images.isEmpty {
-                    serialized["images"] = images
-                }
-                return serialized
-            },
+            "messages": messages.map(serializeChatMessage),
             "stream": stream
         ]
         if !config.tools.isEmpty && config.toolChoice != .none {
@@ -357,14 +347,18 @@ public actor OllamaProvider: AIProvider, TextGenerator {
     public nonisolated func parseChatResponse(_ data: Data) throws -> GenerationResult {
         let json = try jsonObject(data)
         try throwIfOllamaError(json)
-        let text = ((json["message"] as? [String: Any])?["content"] as? String) ?? ""
-        return generationResult(text: text, json: json)
+        let message = (json["message"] as? [String: Any]) ?? [:]
+        let text = message["content"] as? String ?? ""
+        let toolCalls = parseToolCalls(from: message)
+        return generationResult(text: text, json: json, toolCalls: toolCalls)
     }
 
     public nonisolated func parseChatStreamChunk(_ data: Data) throws -> GenerationChunk {
         let json = try jsonObject(data)
         try throwIfOllamaError(json)
-        let text = ((json["message"] as? [String: Any])?["content"] as? String) ?? ""
+        let message = (json["message"] as? [String: Any]) ?? [:]
+        let text = message["content"] as? String ?? ""
+        let toolCalls = parseToolCalls(from: message)
         let completionTokens = json["eval_count"] as? Int ?? 0
         let promptTokens = json["prompt_eval_count"] as? Int ?? 0
         let isDone = json["done"] as? Bool ?? false
@@ -372,8 +366,9 @@ public actor OllamaProvider: AIProvider, TextGenerator {
             text: text,
             tokenCount: completionTokens,
             isComplete: isDone,
-            finishReason: isDone ? mapDoneReason(json["done_reason"] as? String) : nil,
-            usage: isDone ? UsageStats(promptTokens: promptTokens, completionTokens: completionTokens) : nil
+            finishReason: isDone ? (toolCalls.isEmpty ? mapDoneReason(json["done_reason"] as? String) : .toolCalls) : nil,
+            usage: isDone ? UsageStats(promptTokens: promptTokens, completionTokens: completionTokens) : nil,
+            completedToolCalls: toolCalls.isEmpty ? nil : toolCalls
         )
     }
 
@@ -457,18 +452,46 @@ public actor OllamaProvider: AIProvider, TextGenerator {
         }
     }
 
-    private nonisolated func generationResult(text: String, json: [String: Any]) -> GenerationResult {
+    private nonisolated func generationResult(
+        text: String,
+        json: [String: Any],
+        toolCalls: [Transcript.ToolCall] = []
+    ) -> GenerationResult {
         let completionTokens = json["eval_count"] as? Int ?? 0
         let promptTokens = json["prompt_eval_count"] as? Int ?? 0
-        let finishReason = mapDoneReason(json["done_reason"] as? String)
+        let finishReason = toolCalls.isEmpty ? mapDoneReason(json["done_reason"] as? String) : .toolCalls
         return GenerationResult(
-            text: text,
+            text: toolCalls.isEmpty ? text : "",
             tokenCount: completionTokens,
             generationTime: 0,
             tokensPerSecond: 0,
             finishReason: finishReason,
-            usage: UsageStats(promptTokens: promptTokens, completionTokens: completionTokens)
+            usage: UsageStats(promptTokens: promptTokens, completionTokens: completionTokens),
+            toolCalls: toolCalls
         )
+    }
+
+    private nonisolated func serializeChatMessage(_ message: Message) -> [String: Any] {
+        var serialized: [String: Any] = [
+            "role": message.role.rawValue,
+            "content": message.content.textValue
+        ]
+        let images = imagePayloads(from: message.content)
+        if !images.isEmpty {
+            serialized["images"] = images
+        }
+        if message.role == .assistant,
+           let toolCalls = message.metadata?.toolCalls,
+           !toolCalls.isEmpty {
+            serialized["tool_calls"] = toolCalls.enumerated().map { index, toolCall in
+                serializeToolCall(toolCall, index: index)
+            }
+        }
+        if message.role == .tool,
+           let toolName = message.metadata?.custom?["tool_name"] {
+            serialized["tool_name"] = toolName
+        }
+        return serialized
     }
 
     private nonisolated func serializeToolDefinition(_ tool: Transcript.ToolDefinition) -> [String: Any] {
@@ -480,6 +503,52 @@ public actor OllamaProvider: AIProvider, TextGenerator {
                 "parameters": tool.parameters.toJSONSchema()
             ]
         ]
+    }
+
+    private nonisolated func serializeToolCall(_ toolCall: Transcript.ToolCall, index: Int) -> [String: Any] {
+        [
+            "type": "function",
+            "function": [
+                "index": index,
+                "name": toolCall.toolName,
+                "arguments": decodeToolArguments(toolCall.argumentsString)
+            ]
+        ]
+    }
+
+    private nonisolated func parseToolCalls(from message: [String: Any]) -> [Transcript.ToolCall] {
+        guard let rawToolCalls = message["tool_calls"] as? [[String: Any]] else { return [] }
+        return rawToolCalls.enumerated().compactMap { index, rawCall in
+            let function = rawCall["function"] as? [String: Any] ?? rawCall
+            guard let name = function["name"] as? String else { return nil }
+            let id = (rawCall["id"] as? String)
+                ?? (rawCall["call_id"] as? String)
+                ?? "ollama_tool_\(index)"
+            let arguments = encodeToolArguments(function["arguments"])
+            return try? Transcript.ToolCall(id: id, toolName: name, argumentsJSON: arguments)
+        }
+    }
+
+    private nonisolated func encodeToolArguments(_ arguments: Any?) -> String {
+        if let string = arguments as? String {
+            return string.isEmpty ? "{}" : string
+        }
+        if let object = arguments,
+           JSONSerialization.isValidJSONObject(object),
+           let data = try? JSONSerialization.data(withJSONObject: object),
+           let string = String(data: data, encoding: .utf8) {
+            return string
+        }
+        return "{}"
+    }
+
+    private nonisolated func decodeToolArguments(_ argumentsString: String) -> Any {
+        guard let data = argumentsString.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              JSONSerialization.isValidJSONObject(object) else {
+            return [:]
+        }
+        return object
     }
 
     private nonisolated func mapDoneReason(_ reason: String?) -> FinishReason {

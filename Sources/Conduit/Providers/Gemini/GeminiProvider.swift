@@ -277,6 +277,10 @@ public actor GeminiProvider: AIProvider, TextGenerator {
             }
         }
 
+        if (first["finishReason"] as? String)?.uppercased() == "MALFORMED_FUNCTION_CALL" {
+            throw AIError.generationFailed(underlying: SendableError(localizedDescription: "Gemini returned a malformed function call"))
+        }
+
         let finishReason = toolCalls.isEmpty ? mapFinishReason(first["finishReason"] as? String) : .toolCalls
         return GenerationResult(
             text: toolCalls.isEmpty ? text : "",
@@ -292,12 +296,15 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         guard let payload = data.data(using: .utf8), !payload.isEmpty else {
             return nil
         }
+        let json = try jsonObject(payload)
+        let rawFinishReason = (json["candidates"] as? [[String: Any]])?.first?["finishReason"] as? String
         let result = try parseGenerationResponse(data: payload)
+        let hasTerminalReason = rawFinishReason != nil || !result.toolCalls.isEmpty
         return GenerationChunk(
             text: result.text,
             tokenCount: result.tokenCount,
-            isComplete: result.finishReason == .stop,
-            finishReason: result.finishReason,
+            isComplete: hasTerminalReason,
+            finishReason: hasTerminalReason ? result.finishReason : nil,
             completedToolCalls: result.toolCalls.isEmpty ? nil : result.toolCalls
         )
     }
@@ -359,7 +366,7 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
             return .contentFilter
         case "MALFORMED_FUNCTION_CALL":
-            return .toolCalls
+            return .stop
         default:
             return .stop
         }

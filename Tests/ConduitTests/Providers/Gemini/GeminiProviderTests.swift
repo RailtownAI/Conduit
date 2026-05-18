@@ -130,6 +130,23 @@ struct GeminiProviderTests {
         #expect(result.finishReason == .maxTokens)
     }
 
+    @Test("malformed Gemini function calls throw instead of requesting tools")
+    func malformedFunctionCallDoesNotRequestTools() {
+        let provider = GeminiProvider(apiKey: "test-key")
+        let data = Data("""
+        {
+          "candidates": [{
+            "finishReason": "MALFORMED_FUNCTION_CALL",
+            "content": { "parts": [] }
+          }]
+        }
+        """.utf8)
+
+        #expect(throws: AIError.self) {
+            _ = try provider.parseGenerationResponse(data: data)
+        }
+    }
+
     @Test("tool call history serializes function calls and function responses")
     func toolCallHistorySerialization() throws {
         let provider = GeminiProvider(apiKey: "test-key")
@@ -173,6 +190,16 @@ struct GeminiProviderTests {
         """)
 
         #expect(chunk?.text == "Hi")
+        #expect(chunk?.isComplete == false)
+        #expect(chunk?.finishReason == nil)
+
+        let terminalChunk = try provider.decodeStreamEvent("""
+        {"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[{"text":"Done"}]}}]}
+        """)
+
+        #expect(terminalChunk?.text == "Done")
+        #expect(terminalChunk?.isComplete == true)
+        #expect(terminalChunk?.finishReason == .maxTokens)
     }
 
     @Test("stream event parsing surfaces Gemini API errors")

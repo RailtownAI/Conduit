@@ -998,15 +998,27 @@ public final class ConduitLanguageModelSession: @unchecked Sendable {
                 var buffer = ""
 
                 do {
-                    for try await chunk in session.stream(promptEntry.textContent, config: promptEntry.generateConfig(base: baseGenerateConfig)) {
-                        buffer += chunk
+                    for try await event in session.streamEvents(promptEntry.textContent, config: promptEntry.generateConfig(base: baseGenerateConfig)) {
+                        switch event {
+                        case .text(let fragment):
+                            buffer += fragment
 
-                        guard let rawContent = try Self.partialGeneratedContent(from: buffer, type: type) else {
+                            guard let rawContent = try Self.partialGeneratedContent(from: buffer, type: type) else {
+                                continue
+                            }
+
+                            let value = try Content.PartiallyGenerated(rawContent)
+                            continuation.yield(ResponseStream<Content>.Snapshot(content: value, rawContent: rawContent))
+
+                        case .toolCalls(let calls):
+                            self.append(.toolCalls(Transcript.ToolCalls(calls)))
+
+                        case .toolOutput(let output):
+                            self.append(.toolOutput(output))
+
+                        case .chunk, .reasoning, .partialToolCall, .transcriptDelta, .completed:
                             continue
                         }
-
-                        let value = try Content.PartiallyGenerated(rawContent)
-                        continuation.yield(ResponseStream<Content>.Snapshot(content: value, rawContent: rawContent))
                     }
 
                     if type == String.self {

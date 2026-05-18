@@ -543,6 +543,8 @@ extension OpenAIProvider {
                 ?? (json["finish_reason"] as? String)
             let usagePayload = (responsePayload?["usage"] as? [String: Any])
                 ?? (json["usage"] as? [String: Any])
+            let finishReason = mapResponsesFinishReason(finishReasonString)
+                ?? mapResponsesStatusFinishReason(responsePayload ?? json)
 
             return ResponsesStreamEvent(
                 kind: .completed,
@@ -551,7 +553,7 @@ extension OpenAIProvider {
                 toolName: nil,
                 argumentsFragment: nil,
                 reasoningDelta: nil,
-                finishReason: mapResponsesFinishReason(finishReasonString),
+                finishReason: finishReason,
                 usage: parseResponsesUsage(usagePayload)
             )
 
@@ -773,6 +775,19 @@ extension OpenAIProvider {
         }
 
         continuation.finish()
+    }
+
+    private nonisolated func mapResponsesStatusFinishReason(_ payload: [String: Any]) -> FinishReason? {
+        guard let status = payload["status"] as? String else { return nil }
+        switch status {
+        case "cancelled", "canceled":
+            return .cancelled
+        case "incomplete":
+            let details = payload["incomplete_details"] as? [String: Any]
+            return mapResponsesFinishReason(details?["reason"] as? String) ?? .maxTokens
+        default:
+            return nil
+        }
     }
 
     private nonisolated func mapResponsesFinishReason(_ finishReason: String?) -> FinishReason? {

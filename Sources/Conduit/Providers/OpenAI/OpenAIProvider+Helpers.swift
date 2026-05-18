@@ -767,8 +767,17 @@ extension OpenAIProvider {
         let text = outputText ?? extractedText ?? ""
         let usage = parseUsageStats(json["usage"] as? [String: Any])
 
+        if let status = json["status"] as? String,
+           status == "failed" || status == "error" {
+            let errorPayload = json["error"] as? [String: Any]
+            let message = errorPayload?["message"] as? String
+            throw AIError.serverError(statusCode: 500, message: message)
+        }
+
         let finishReason: FinishReason
         if let mapped = mapFinishReason(json["finish_reason"] as? String) {
+            finishReason = mapped
+        } else if let mapped = mapResponsesStatusFinishReason(json) {
             finishReason = mapped
         } else if !toolCalls.isEmpty {
             finishReason = .toolCalls
@@ -914,6 +923,19 @@ extension OpenAIProvider {
             ?? 0
 
         return UsageStats(promptTokens: promptTokens, completionTokens: completionTokens)
+    }
+
+    private func mapResponsesStatusFinishReason(_ json: [String: Any]) -> FinishReason? {
+        guard let status = json["status"] as? String else { return nil }
+        switch status {
+        case "cancelled", "canceled":
+            return .cancelled
+        case "incomplete":
+            let details = json["incomplete_details"] as? [String: Any]
+            return mapFinishReason(details?["reason"] as? String) ?? .maxTokens
+        default:
+            return nil
+        }
     }
 
     private func mapFinishReason(_ finishReason: String?) -> FinishReason? {
