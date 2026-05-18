@@ -267,6 +267,9 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
     /// If `nil`, tool-call responses are treated as invalid input errors.
     public var toolExecutor: ToolExecutor?
 
+    /// Optional delegate for observing and intercepting model-generated tool calls.
+    public var toolExecutionDelegate: (any ToolExecutionDelegate)?
+
     /// Retry policy for tool execution in `send(_:)`.
     ///
     /// This policy is applied to each tool call in the tool loop. The default
@@ -492,6 +495,15 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
     /// - Throws: `AIError` if generation fails, or `CancellationError` if cancelled.
     @discardableResult
     public func send(_ content: String) async throws -> String {
+        try await sendImpl(content, config: nil)
+    }
+
+    @discardableResult
+    public func send(_ content: String, config configOverride: GenerateConfig) async throws -> String {
+        try await sendImpl(content, config: configOverride)
+    }
+
+    private func sendImpl(_ content: String, config configOverride: GenerateConfig?) async throws -> String {
         // Create user message and prepare state
         let userMessage = Message.user(content)
 
@@ -500,6 +512,7 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
             messages: [Message],
             config: GenerateConfig,
             toolExecutor: ToolExecutor?,
+            toolExecutionDelegate: (any ToolExecutionDelegate)?,
             toolCallRetryPolicy: ToolExecutor.RetryPolicy,
             maxToolCallRounds: Int
         ) = withLock {
@@ -511,6 +524,7 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
                 messages,
                 config,
                 toolExecutor,
+                toolExecutionDelegate,
                 toolCallRetryPolicy,
                 max(0, maxToolCallRounds)
             )
@@ -519,8 +533,9 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
         // Capture model outside lock (immutable after initialization)
         let currentModel = model
         let currentMessages = capturedState.messages
-        let currentConfig = capturedState.config
+        let currentConfig = configOverride ?? capturedState.config
         let currentToolExecutor = capturedState.toolExecutor
+        let currentToolExecutionDelegate = capturedState.toolExecutionDelegate
         let currentToolCallRetryPolicy = capturedState.toolCallRetryPolicy
         let currentMaxToolCallRounds = capturedState.maxToolCallRounds
 
@@ -578,10 +593,24 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
                     )
                 }
 
-                let toolOutputs = try await currentToolExecutor.execute(
-                    toolCalls: result.toolCalls,
-                    retryPolicy: currentToolCallRetryPolicy
-                )
+                let toolOutputs: [Transcript.ToolOutput]
+                if let currentToolExecutionDelegate {
+                    let executionResult = try await currentToolExecutor.execute(
+                        toolCalls: result.toolCalls,
+                        retryPolicy: currentToolCallRetryPolicy,
+                        delegate: currentToolExecutionDelegate
+                    )
+                    guard executionResult.shouldContinue else {
+                        finalResponseText = result.text
+                        break
+                    }
+                    toolOutputs = executionResult.outputs
+                } else {
+                    toolOutputs = try await currentToolExecutor.execute(
+                        toolCalls: result.toolCalls,
+                        retryPolicy: currentToolCallRetryPolicy
+                    )
+                }
                 try Task.checkCancellation()
                 try throwIfCancelled()
                 for output in toolOutputs {
@@ -655,6 +684,14 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
     /// - Parameter content: The user message text.
     /// - Returns: An async throwing stream of response tokens.
     public func stream(_ content: String) -> AsyncThrowingStream<String, Error> {
+        streamImpl(content, config: nil)
+    }
+
+    public func stream(_ content: String, config configOverride: GenerateConfig) -> AsyncThrowingStream<String, Error> {
+        streamImpl(content, config: configOverride)
+    }
+
+    private func streamImpl(_ content: String, config configOverride: GenerateConfig?) -> AsyncThrowingStream<String, Error> {
         let userMessage = Message.user(content)
 
         // Prepare state and capture messages under lock
@@ -668,7 +705,7 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
 
         // Capture model and config for the async operation
         let currentModel = model
-        let currentConfig = config
+        let currentConfig = configOverride ?? config
 
         return AsyncThrowingStream { continuation in
             let task = Task { [weak self] in

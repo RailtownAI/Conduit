@@ -8,12 +8,50 @@ public typealias AnyTool = any ConduitAdvanced.Tool
 public typealias GeneratedImage = ConduitAdvanced.GeneratedImage
 public typealias ImageGenerationConfig = ConduitAdvanced.ImageGenerationConfig
 public typealias ImageGenerationProgress = ConduitAdvanced.ImageGenerationProgress
+public typealias GenerateConfig = ConduitAdvanced.GenerateConfig
+public typealias GeneratedContent = ConduitAdvanced.GeneratedContent
+public typealias GenerationOptions = ConduitAdvanced.GenerationOptions
+public typealias GenerationSchema = ConduitAdvanced.GenerationSchema
+public typealias Prompt = ConduitAdvanced.Prompt
+public typealias Instructions = ConduitAdvanced.Instructions
+public typealias Transcript = ConduitAdvanced.Transcript
+public typealias ConduitLanguageModel = ConduitAdvanced.ConduitLanguageModel
+public typealias ConduitLanguageModelSession = ConduitAdvanced.ConduitLanguageModelSession
+public typealias ToolExecutionDecision = ConduitAdvanced.ToolExecutionDecision
+public typealias ToolExecutionDelegate = ConduitAdvanced.ToolExecutionDelegate
+
+#if CONDUIT_TRAIT_OPENAI || CONDUIT_TRAIT_OPENROUTER
+public typealias OpenResponsesProvider = ConduitAdvanced.OpenResponsesProvider
+public typealias OpenResponsesOptions = ConduitAdvanced.OpenResponsesOptions
+#endif
+
+#if CONDUIT_TRAIT_GEMINI
+public typealias GeminiConfiguration = ConduitAdvanced.GeminiConfiguration
+public typealias GeminiOptions = ConduitAdvanced.GeminiOptions
+public typealias GeminiProvider = ConduitAdvanced.GeminiProvider
+#endif
+
+#if CONDUIT_TRAIT_OLLAMA
+public typealias OllamaNativeConfiguration = ConduitAdvanced.OllamaNativeConfiguration
+public typealias OllamaNativeOptions = ConduitAdvanced.OllamaNativeOptions
+public typealias OllamaProvider = ConduitAdvanced.OllamaProvider
+public typealias OllamaPullProgress = ConduitAdvanced.OllamaPullProgress
+public typealias OllamaModelSummary = ConduitAdvanced.OllamaModelSummary
+public typealias OllamaModelShow = ConduitAdvanced.OllamaModelShow
+public typealias OllamaDiagnostics = ConduitAdvanced.OllamaDiagnostics
+#endif
 
 public let conduitVersion = ConduitAdvanced.conduitVersion
 
 // MARK: - Model
 
 public typealias Model = ConduitAdvanced.Model
+
+extension ConduitLanguageModel {
+    public init(provider: Provider, model: Model) {
+        self.init(provider: provider.raw, model: model)
+    }
+}
 
 // MARK: - Run Options
 
@@ -213,6 +251,34 @@ public struct Provider {
         }
 
         return .init(raw: raw)
+    }
+
+    public static func openResponses(
+        apiKey: String,
+        baseURL: URL? = nil,
+        configure: (inout OpenAIOptions) -> Void = { _ in },
+        expert: ((inout ConduitAdvanced.Provider.OpenAIOptions) -> Void)? = nil
+    ) -> Self {
+        var options = OpenAIOptions(api: .responses)
+        configure(&options)
+
+        let raw = ConduitAdvanced.Provider.openResponses(apiKey: apiKey, baseURL: baseURL) { raw in
+            raw.timeout = options.timeout
+            raw.maxRetries = options.maxRetries
+            raw.api = .responses
+            expert?(&raw)
+        }
+
+        return .init(raw: raw)
+    }
+    #endif
+
+    #if CONDUIT_TRAIT_GEMINI
+    public static func gemini(
+        apiKey: String,
+        configure: (inout GeminiConfiguration) -> Void = { _ in }
+    ) -> Self {
+        .init(raw: ConduitAdvanced.Provider.gemini(apiKey: apiKey, configure: configure))
     }
     #endif
 

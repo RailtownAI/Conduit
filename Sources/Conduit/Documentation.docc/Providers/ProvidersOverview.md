@@ -32,6 +32,7 @@ Conduit supports 10 providers spanning cloud APIs, local inference, and system-i
 
 - **``AnthropicProvider``** — Best reasoning quality, vision, extended thinking. Ideal for complex tasks.
 - **OpenAI via ``OpenAIProvider``** — Broadest feature set (embeddings, images, audio). Enterprise support via Azure.
+- **``GeminiProvider``** — Native Gemini API support for text, structured JSON, function calls, and multimodal image input.
 - **OpenRouter via ``OpenAIProvider``** — Access 200+ models with automatic failover and latency routing.
 
 ### For Privacy and Offline Use
@@ -39,6 +40,7 @@ Conduit supports 10 providers spanning cloud APIs, local inference, and system-i
 - **``MLXProvider``** — Best local performance on Apple Silicon. Zero network traffic.
 - **``FoundationModelsProvider``** — Zero setup on iOS 26+/macOS 26+. System-managed.
 - **Ollama via ``OpenAIProvider``** — Local inference server, works on macOS and Linux.
+- **``OllamaProvider``** — Native Ollama runtime management for model listing, details, pull progress, and diagnostics.
 - **``LlamaProvider``** — Direct llama.cpp integration for GGUF models.
 - **``CoreMLProvider``** — Native Core ML models with Neural Engine acceleration.
 
@@ -57,6 +59,7 @@ Conduit supports 10 providers spanning cloud APIs, local inference, and system-i
 | Anthropic | `ANTHROPIC_API_KEY` | `.apiKey` or `.auto` |
 | OpenAI | `OPENAI_API_KEY` | `.bearer` or `.auto` |
 | OpenRouter | `OPENROUTER_API_KEY` | `.bearer` or `.auto` |
+| Gemini | `GEMINI_API_KEY` | API key |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` | `.apiKey` |
 | Kimi | `MOONSHOT_API_KEY` | `.apiKey` or `.auto` |
 | MiniMax | `MINIMAX_API_KEY` | `.apiKey` or `.auto` |
@@ -73,6 +76,8 @@ Most providers support `.auto` authentication that resolves keys from environmen
 |----------|----------------|
 | AnthropicProvider | `Anthropic` |
 | OpenAIProvider | `OpenAI` and/or `OpenRouter` |
+| GeminiProvider | `Gemini` |
+| OllamaProvider | `Ollama` |
 | MLXProvider | `MLX` |
 | HuggingFaceProvider | (always available) |
 | FoundationModelsProvider | (platform-gated, no trait) |
@@ -87,6 +92,7 @@ Most providers support `.auto` authentication that resolves keys from environmen
 
 - <doc:AnthropicProvider>
 - <doc:OpenAIProvider>
+- <doc:GeminiProvider>
 - <doc:MLXProvider>
 - <doc:HuggingFaceProvider>
 - <doc:FoundationModelsProvider>
@@ -94,3 +100,4 @@ Most providers support `.auto` authentication that resolves keys from environmen
 - <doc:MiniMaxProvider>
 - <doc:CoreMLProvider>
 - <doc:LlamaProvider>
+- <doc:OllamaProvider>

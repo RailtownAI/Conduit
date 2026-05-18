@@ -65,6 +65,25 @@ import Foundation
         guard case let .object(value) = self else { return nil }
         return value
     }
+
+    public var anyValue: Any {
+        switch self {
+        case .null:
+            NSNull()
+        case .bool(let value):
+            value
+        case .int(let value):
+            value
+        case .double(let value):
+            value
+        case .string(let value):
+            value
+        case .array(let values):
+            values.map(\.anyValue)
+        case .object(let values):
+            values.mapValues(\.anyValue)
+        }
+    }
 }
 
 // MARK: - Codable

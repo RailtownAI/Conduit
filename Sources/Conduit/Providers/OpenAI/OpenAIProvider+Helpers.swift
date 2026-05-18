@@ -293,8 +293,80 @@ extension OpenAIProvider {
             body["reasoning"] = serializeReasoningConfig(reasoning)
         }
 
+        applyOpenResponsesOptions(from: config, to: &body)
+
         return body
     }
+
+    private nonisolated func applyOpenResponsesOptions(
+        from config: GenerateConfig,
+        to body: inout [String: Any]
+    ) {
+        guard let options: OpenResponsesOptions = config[custom: OpenResponsesProvider.self] else {
+            return
+        }
+
+        if let allowedTools = options.allowedTools {
+            body["tool_choice"] = allowedToolsToolChoice(
+                names: allowedTools,
+                requestedChoice: options.toolChoice
+            )
+        } else if let toolChoice = options.toolChoice {
+            body["tool_choice"] = toolChoice.anyValue
+        }
+
+        if let reasoning = options.reasoning {
+            body["reasoning"] = reasoning.anyValue
+        }
+
+        if let verbosity = options.verbosity {
+            var text = body["text"] as? [String: Any] ?? [:]
+            text["verbosity"] = verbosity
+            body["text"] = text
+        }
+
+        if let truncation = options.truncation {
+            body["truncation"] = truncation
+        }
+
+        if let metadata = options.metadata {
+            body["metadata"] = metadata
+        }
+
+        for (key, value) in options.extraBody where !Self.openResponsesReservedBodyKeys.contains(key) {
+            body[key] = value.anyValue
+        }
+    }
+
+    private nonisolated func allowedToolsToolChoice(
+        names: [String],
+        requestedChoice: JSONValue?
+    ) -> [String: Any] {
+        let mode: String
+        if case .string(let choice) = requestedChoice, choice == "required" {
+            mode = "required"
+        } else {
+            mode = "auto"
+        }
+
+        return [
+            "type": "allowed_tools",
+            "mode": mode,
+            "tools": names.map { name in
+                [
+                    "type": "function",
+                    "name": name
+                ]
+            }
+        ]
+    }
+
+    private nonisolated static let openResponsesReservedBodyKeys: Set<String> = [
+        "model",
+        "input",
+        "messages",
+        "stream"
+    ]
 
     // MARK: - Content Serialization
 

@@ -594,6 +594,12 @@ public struct GenerateConfig: Sendable, Codable, GenerateConfigProtocol {
     /// Cloud provider configuration.
     public var cloud: CloudGenerateConfig
 
+    /// Provider-owned request options keyed by provider type.
+    ///
+    /// These options are intentionally opaque to `GenerateConfig`; only the owning
+    /// provider should decode and serialize them into transport payloads.
+    private var customProviderOptions: [String: JSONValue]
+
     // MARK: - Forwarded Properties (Local)
 
     public var maxTokens: Int? {
@@ -732,7 +738,8 @@ public struct GenerateConfig: Sendable, Codable, GenerateConfigProtocol {
         responseFormat: ResponseFormat? = nil,
         reasoning: ReasoningConfig? = nil,
         runtimeFeatures: ProviderRuntimeFeatureConfiguration? = nil,
-        runtimePolicyOverride: ProviderRuntimePolicyOverride? = nil
+        runtimePolicyOverride: ProviderRuntimePolicyOverride? = nil,
+        customProviderOptions: [String: JSONValue] = [:]
     ) {
         self.local = LocalGenerateConfig(
             maxTokens: maxTokens,
@@ -760,6 +767,7 @@ public struct GenerateConfig: Sendable, Codable, GenerateConfigProtocol {
             reasoning: reasoning,
             responseFormat: responseFormat
         )
+        self.customProviderOptions = customProviderOptions
     }
 
     // MARK: - Codable
@@ -773,6 +781,7 @@ public struct GenerateConfig: Sendable, Codable, GenerateConfigProtocol {
         case tools, toolChoice, parallelToolCalls, maxToolCalls
         case responseFormat, reasoning
         case runtimeFeatures, runtimePolicyOverride
+        case customProviderOptions
     }
 
     public init(from decoder: Decoder) throws {
@@ -799,6 +808,7 @@ public struct GenerateConfig: Sendable, Codable, GenerateConfigProtocol {
         let reasoning = try container.decodeIfPresent(ReasoningConfig.self, forKey: .reasoning)
         let runtimeFeatures = try container.decodeIfPresent(ProviderRuntimeFeatureConfiguration.self, forKey: .runtimeFeatures)
         let runtimePolicyOverride = try container.decodeIfPresent(ProviderRuntimePolicyOverride.self, forKey: .runtimePolicyOverride)
+        let customProviderOptions = try container.decodeIfPresent([String: JSONValue].self, forKey: .customProviderOptions) ?? [:]
 
         self.local = LocalGenerateConfig(
             maxTokens: maxTokens,
@@ -826,6 +836,7 @@ public struct GenerateConfig: Sendable, Codable, GenerateConfigProtocol {
             reasoning: reasoning,
             responseFormat: responseFormat
         )
+        self.customProviderOptions = customProviderOptions
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -852,6 +863,66 @@ public struct GenerateConfig: Sendable, Codable, GenerateConfigProtocol {
         try container.encodeIfPresent(reasoning, forKey: .reasoning)
         try container.encodeIfPresent(runtimeFeatures, forKey: .runtimeFeatures)
         try container.encodeIfPresent(runtimePolicyOverride, forKey: .runtimePolicyOverride)
+        if !customProviderOptions.isEmpty {
+            try container.encode(customProviderOptions, forKey: .customProviderOptions)
+        }
+    }
+
+    // MARK: - Typed Provider Options
+
+    public subscript<Provider, Options: Codable & Sendable>(
+        custom provider: Provider.Type
+    ) -> Options? {
+        get {
+            customOptions(for: provider, as: Options.self)
+        }
+        set {
+            do {
+                try setCustomOptions(newValue, for: provider)
+            } catch {
+                customProviderOptions.removeValue(forKey: Self.customProviderKey(provider))
+            }
+        }
+    }
+
+    /// Decodes custom options owned by the given provider type.
+    public func customOptions<Provider, Options: Codable & Sendable>(
+        for provider: Provider.Type,
+        as type: Options.Type = Options.self
+    ) -> Options? {
+        guard let stored = customProviderOptions[Self.customProviderKey(provider)] else {
+            return nil
+        }
+
+        do {
+            let data = try JSONEncoder().encode(stored)
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Returns raw JSON custom options for provider-owned request serialization.
+    public func customOptionsJSON<Provider>(for provider: Provider.Type) -> JSONValue? {
+        customProviderOptions[Self.customProviderKey(provider)]
+    }
+
+    /// Sets or removes custom options owned by the given provider type.
+    public mutating func setCustomOptions<Provider, Options: Codable & Sendable>(
+        _ options: Options?,
+        for provider: Provider.Type
+    ) throws {
+        let key = Self.customProviderKey(provider)
+        guard let options else {
+            customProviderOptions.removeValue(forKey: key)
+            return
+        }
+
+        customProviderOptions[key] = try JSONValue(options)
+    }
+
+    private static func customProviderKey(_ provider: Any.Type) -> String {
+        String(reflecting: provider)
     }
 
     // MARK: - Static Presets

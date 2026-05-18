@@ -40,6 +40,7 @@ export default defineConfig({
             { text: 'Streaming', link: '/guide/streaming' },
             { text: 'Structured Output', link: '/guide/structured-output' },
             { text: 'Tool Calling', link: '/guide/tool-calling' },
+            { text: 'FoundationModels Compatibility', link: '/guide/foundationmodels-compatibility' },
           ],
         },
         {
@@ -70,6 +71,7 @@ export default defineConfig({
           items: [
             { text: 'Anthropic', link: '/providers/anthropic' },
             { text: 'OpenAI', link: '/providers/openai' },
+            { text: 'Gemini', link: '/providers/gemini' },
             { text: 'HuggingFace', link: '/providers/huggingface' },
             { text: 'Kimi', link: '/providers/kimi' },
             { text: 'MiniMax', link: '/providers/minimax' },
@@ -82,6 +84,7 @@ export default defineConfig({
             { text: 'Foundation Models', link: '/providers/foundation-models' },
             { text: 'CoreML', link: '/providers/coreml' },
             { text: 'Llama', link: '/providers/llama' },
+            { text: 'Ollama', link: '/providers/ollama' },
           ],
         },
       ],

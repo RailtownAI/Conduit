@@ -162,6 +162,14 @@ let package = Package(
             description: "Enable MiniMax provider support (OpenAI-compatible)"
         ),
         .trait(
+            name: "Gemini",
+            description: "Enable Google Gemini native API provider support"
+        ),
+        .trait(
+            name: "Ollama",
+            description: "Enable native Ollama local runtime management support"
+        ),
+        .trait(
             name: "MLX",
             description: "Enable MLX on-device inference (Apple Silicon only)"
         ),
@@ -204,6 +212,8 @@ let package = Package(
                 .define("CONDUIT_TRAIT_ANTHROPIC", .when(traits: ["Anthropic"])),
                 .define("CONDUIT_TRAIT_KIMI", .when(traits: ["Kimi"])),
                 .define("CONDUIT_TRAIT_MINIMAX", .when(traits: ["MiniMax"])),
+                .define("CONDUIT_TRAIT_GEMINI", .when(traits: ["Gemini"])),
+                .define("CONDUIT_TRAIT_OLLAMA", .when(traits: ["Ollama"])),
                 .define("CONDUIT_TRAIT_MLX", .when(traits: ["MLX"])),
                 .define("CONDUIT_TRAIT_COREML", .when(traits: ["CoreML"])),
                 .enableExperimentalFeature("StrictConcurrency")
@@ -221,6 +231,8 @@ let package = Package(
                 .define("CONDUIT_TRAIT_ANTHROPIC", .when(traits: ["Anthropic"])),
                 .define("CONDUIT_TRAIT_KIMI", .when(traits: ["Kimi"])),
                 .define("CONDUIT_TRAIT_MINIMAX", .when(traits: ["MiniMax"])),
+                .define("CONDUIT_TRAIT_GEMINI", .when(traits: ["Gemini"])),
+                .define("CONDUIT_TRAIT_OLLAMA", .when(traits: ["Ollama"])),
                 .define("CONDUIT_TRAIT_MLX", .when(traits: ["MLX"])),
                 .define("CONDUIT_TRAIT_COREML", .when(traits: ["CoreML"])),
                 .enableExperimentalFeature("StrictConcurrency")
@@ -236,6 +248,8 @@ let package = Package(
                 .define("CONDUIT_TRAIT_ANTHROPIC", .when(traits: ["Anthropic"])),
                 .define("CONDUIT_TRAIT_KIMI", .when(traits: ["Kimi"])),
                 .define("CONDUIT_TRAIT_MINIMAX", .when(traits: ["MiniMax"])),
+                .define("CONDUIT_TRAIT_GEMINI", .when(traits: ["Gemini"])),
+                .define("CONDUIT_TRAIT_OLLAMA", .when(traits: ["Ollama"])),
                 .define("CONDUIT_TRAIT_MLX", .when(traits: ["MLX"])),
                 .define("CONDUIT_TRAIT_COREML", .when(traits: ["CoreML"])),
                 .unsafeFlags(["-module-cache-path", swiftModuleCachePath]),
@@ -253,6 +267,8 @@ let package = Package(
                 .define("CONDUIT_TRAIT_ANTHROPIC", .when(traits: ["Anthropic"])),
                 .define("CONDUIT_TRAIT_KIMI", .when(traits: ["Kimi"])),
                 .define("CONDUIT_TRAIT_MINIMAX", .when(traits: ["MiniMax"])),
+                .define("CONDUIT_TRAIT_GEMINI", .when(traits: ["Gemini"])),
+                .define("CONDUIT_TRAIT_OLLAMA", .when(traits: ["Ollama"])),
                 .define("CONDUIT_TRAIT_MLX", .when(traits: ["MLX"])),
                 .define("CONDUIT_TRAIT_COREML", .when(traits: ["CoreML"])),
                 .unsafeFlags(["-module-cache-path", swiftModuleCachePath]),

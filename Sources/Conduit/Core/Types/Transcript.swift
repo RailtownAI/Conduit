@@ -362,14 +362,48 @@ public struct Transcript: Sendable, Equatable, Codable {
         /// Arguments to pass to the invoked tool.
         public var arguments: GeneratedContent
 
-        public init(id: String, toolName: String, arguments: GeneratedContent) {
+        /// Provider-owned metadata required to continue a tool-call turn.
+        public var metadata: [String: JSONValue]
+
+        public init(
+            id: String,
+            toolName: String,
+            arguments: GeneratedContent,
+            metadata: [String: JSONValue] = [:]
+        ) {
             self.id = id
             self.toolName = toolName
             self.arguments = arguments
+            self.metadata = metadata
         }
 
         public func hash(into hasher: inout Hasher) {
             hasher.combine(id)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case toolName
+            case arguments
+            case metadata
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.id = try container.decode(String.self, forKey: .id)
+            self.toolName = try container.decode(String.self, forKey: .toolName)
+            self.arguments = try container.decode(GeneratedContent.self, forKey: .arguments)
+            self.metadata = try container.decodeIfPresent([String: JSONValue].self, forKey: .metadata) ?? [:]
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            try container.encode(toolName, forKey: .toolName)
+            try container.encode(arguments, forKey: .arguments)
+            if !metadata.isEmpty {
+                try container.encode(metadata, forKey: .metadata)
+            }
         }
     }
 

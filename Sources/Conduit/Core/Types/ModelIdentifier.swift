@@ -110,6 +110,11 @@ public enum ModelIdentifier: ModelIdentifying, Codable {
     /// - Parameter id: The MiniMax model ID (e.g., "MiniMax-M2.7")
     case miniMax(String)
 
+    /// Google Gemini native API models (cloud).
+    ///
+    /// - Parameter id: The Gemini model ID (e.g., "gemini-3-flash-preview")
+    case gemini(String)
+
     // MARK: - ModelIdentifying
 
     /// The raw string identifier for this model.
@@ -138,6 +143,8 @@ public enum ModelIdentifier: ModelIdentifying, Codable {
         case .kimi(let id):
             return id
         case .miniMax(let id):
+            return id
+        case .gemini(let id):
             return id
         }
     }
@@ -173,6 +180,8 @@ public enum ModelIdentifier: ModelIdentifying, Codable {
             return id
         case .miniMax(let id):
             return id
+        case .gemini(let id):
+            return id
         }
     }
 
@@ -201,6 +210,8 @@ public enum ModelIdentifier: ModelIdentifying, Codable {
             return .kimi
         case .miniMax:
             return .minimax
+        case .gemini:
+            return .gemini
         }
     }
 
@@ -237,6 +248,7 @@ public enum ModelIdentifier: ModelIdentifying, Codable {
         case foundationModels
         case kimi
         case miniMax
+        case gemini
     }
 
     /// Decodes a ModelIdentifier from a JSON decoder.
@@ -294,6 +306,9 @@ public enum ModelIdentifier: ModelIdentifying, Codable {
         case .miniMax:
             let id = try container.decode(String.self, forKey: .id)
             self = .miniMax(id)
+        case .gemini:
+            let id = try container.decode(String.self, forKey: .id)
+            self = .gemini(id)
         }
     }
 
@@ -350,6 +365,9 @@ public enum ModelIdentifier: ModelIdentifying, Codable {
 
         case .miniMax(let id):
             try container.encode(ModelType.miniMax, forKey: .type)
+            try container.encode(id, forKey: .id)
+        case .gemini(let id):
+            try container.encode(ModelType.gemini, forKey: .type)
             try container.encode(id, forKey: .id)
         }
     }

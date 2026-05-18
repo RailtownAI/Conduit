@@ -42,6 +42,7 @@ let local = try await mlx.generate(
 - <doc:Streaming>
 - <doc:StructuredOutput>
 - <doc:ToolCalling>
+- <doc:FoundationModelsCompatibility>
 
 ### Services
 
@@ -61,6 +62,7 @@ let local = try await mlx.generate(
 - <doc:ProvidersOverview>
 - <doc:AnthropicProvider>
 - <doc:OpenAIProvider>
+- <doc:GeminiProvider>
 - <doc:MLXProvider>
 - <doc:HuggingFaceProvider>
 - <doc:FoundationModelsProvider>
@@ -68,6 +70,7 @@ let local = try await mlx.generate(
 - <doc:MiniMaxProvider>
 - <doc:CoreMLProvider>
 - <doc:LlamaProvider>
+- <doc:OllamaProvider>
 
 ### Core Protocols
 
