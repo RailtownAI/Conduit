@@ -23,10 +23,29 @@ docs/.vitepress/cache/
 
 # API audit working documents
 docs/reference/
+docs/plans/
+docs/superpowers/
+docs/RESEARCH_*.md
+docs/CONDUIT_FRAMEWORK_COMPREHENSIVE_GUIDE.md
+
+# Internal planning / agent / marketing artifacts
+.agents/
+.sisyphus/
+tasks/
+marketing/
+front-facing-api.md
 
 # Git worktrees
 .worktrees/
-docs/
-tasks/
-marketing/
-scripts/
+
+# Local working copies of unrelated repos (not Conduit's tracked content).
+# `docs/` and `scripts/` may contain tracked public content — do NOT
+# blanket-ignore them. Add narrower rules here if sub-trees should be excluded
+# (e.g. `docs/.vitepress/dist/` is already excluded above).
+
+# Per AGENTS.md ("Never commit docs created for planning"), exclude planning
+# / research scratch markdown placed at the repo root.
+/RESEARCH_*.md
+/PLAN_*.md
+/TODO_*.md
+/NOTES_*.md
