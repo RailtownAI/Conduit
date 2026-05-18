@@ -2,7 +2,7 @@
 import Foundation
 import Testing
 import Conduit
-@testable import ConduitAdvanced
+@testable import Conduit
 
 #if canImport(Darwin)
 import Darwin

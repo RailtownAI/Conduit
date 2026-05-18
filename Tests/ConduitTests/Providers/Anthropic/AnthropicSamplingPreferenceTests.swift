@@ -15,7 +15,7 @@
 #if CONDUIT_TRAIT_ANTHROPIC
 import Testing
 import Foundation
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Suite("Anthropic temperature/top_p sampling preference")
 struct AnthropicSamplingPreferenceTests {

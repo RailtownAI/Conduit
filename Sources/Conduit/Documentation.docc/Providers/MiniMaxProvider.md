@@ -15,7 +15,7 @@ export MINIMAX_API_KEY=...
 ```
 
 ```swift
-import ConduitAdvanced
+import Conduit
 
 // Uses MINIMAX_API_KEY from the environment
 let provider = MiniMaxProvider()
@@ -39,7 +39,7 @@ let explicitProvider = MiniMaxProvider(apiKey: "...")
 ## Text Generation
 
 ```swift
-import ConduitAdvanced
+import Conduit
 
 let provider = MiniMaxProvider()
 
@@ -54,7 +54,7 @@ print(response)
 ## Streaming
 
 ```swift
-import ConduitAdvanced
+import Conduit
 
 let provider = MiniMaxProvider()
 
@@ -70,7 +70,7 @@ for try await text in provider.stream(
 ## Configuration
 
 ```swift
-import ConduitAdvanced
+import Conduit
 
 let provider = MiniMaxProvider(
     apiKey: "...",

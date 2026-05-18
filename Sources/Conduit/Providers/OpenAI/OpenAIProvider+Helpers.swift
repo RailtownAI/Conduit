@@ -293,8 +293,80 @@ extension OpenAIProvider {
             body["reasoning"] = serializeReasoningConfig(reasoning)
         }
 
+        applyOpenResponsesOptions(from: config, to: &body)
+
         return body
     }
+
+    private nonisolated func applyOpenResponsesOptions(
+        from config: GenerateConfig,
+        to body: inout [String: Any]
+    ) {
+        guard let options: OpenResponsesOptions = config[custom: OpenResponsesProvider.self] else {
+            return
+        }
+
+        if let allowedTools = options.allowedTools {
+            body["tool_choice"] = allowedToolsToolChoice(
+                names: allowedTools,
+                requestedChoice: options.toolChoice
+            )
+        } else if let toolChoice = options.toolChoice {
+            body["tool_choice"] = toolChoice.anyValue
+        }
+
+        if let reasoning = options.reasoning {
+            body["reasoning"] = reasoning.anyValue
+        }
+
+        if let verbosity = options.verbosity {
+            var text = body["text"] as? [String: Any] ?? [:]
+            text["verbosity"] = verbosity
+            body["text"] = text
+        }
+
+        if let truncation = options.truncation {
+            body["truncation"] = truncation
+        }
+
+        if let metadata = options.metadata {
+            body["metadata"] = metadata
+        }
+
+        for (key, value) in options.extraBody where !Self.openResponsesReservedBodyKeys.contains(key) {
+            body[key] = value.anyValue
+        }
+    }
+
+    private nonisolated func allowedToolsToolChoice(
+        names: [String],
+        requestedChoice: JSONValue?
+    ) -> [String: Any] {
+        let mode: String
+        if case .string(let choice) = requestedChoice, choice == "required" {
+            mode = "required"
+        } else {
+            mode = "auto"
+        }
+
+        return [
+            "type": "allowed_tools",
+            "mode": mode,
+            "tools": names.map { name in
+                [
+                    "type": "function",
+                    "name": name
+                ]
+            }
+        ]
+    }
+
+    private nonisolated static let openResponsesReservedBodyKeys: Set<String> = [
+        "model",
+        "input",
+        "messages",
+        "stream"
+    ]
 
     // MARK: - Content Serialization
 
@@ -695,8 +767,17 @@ extension OpenAIProvider {
         let text = outputText ?? extractedText ?? ""
         let usage = parseUsageStats(json["usage"] as? [String: Any])
 
+        if let status = json["status"] as? String,
+           status == "failed" || status == "error" {
+            let errorPayload = json["error"] as? [String: Any]
+            let message = errorPayload?["message"] as? String
+            throw AIError.serverError(statusCode: 500, message: message)
+        }
+
         let finishReason: FinishReason
         if let mapped = mapFinishReason(json["finish_reason"] as? String) {
+            finishReason = mapped
+        } else if let mapped = mapResponsesStatusFinishReason(json) {
             finishReason = mapped
         } else if !toolCalls.isEmpty {
             finishReason = .toolCalls
@@ -842,6 +923,19 @@ extension OpenAIProvider {
             ?? 0
 
         return UsageStats(promptTokens: promptTokens, completionTokens: completionTokens)
+    }
+
+    private func mapResponsesStatusFinishReason(_ json: [String: Any]) -> FinishReason? {
+        guard let status = json["status"] as? String else { return nil }
+        switch status {
+        case "cancelled", "canceled":
+            return .cancelled
+        case "incomplete":
+            let details = json["incomplete_details"] as? [String: Any]
+            return mapFinishReason(details?["reason"] as? String) ?? .maxTokens
+        default:
+            return nil
+        }
     }
 
     private func mapFinishReason(_ finishReason: String?) -> FinishReason? {

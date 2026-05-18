@@ -6,7 +6,7 @@
 #if CONDUIT_TRAIT_OPENAI || CONDUIT_TRAIT_OPENROUTER
 import Testing
 import Foundation
-@testable import ConduitAdvanced
+@testable import Conduit
 
 // MARK: - Configuration Tests
 
@@ -172,6 +172,15 @@ struct OpenAIEndpointTests {
         #expect(endpoint.baseURL.absoluteString == "http://localhost:11434/v1")
         #expect(endpoint.isLocal == true)
         #expect(endpoint.requiresAuthentication == false)
+    }
+
+    @Test("LM Studio configuration uses local OpenAI-compatible defaults")
+    func lmStudioConfigurationDefaults() {
+        let configuration = OpenAIConfiguration.lmStudio()
+
+        #expect(configuration.endpoint.baseURL.absoluteString == "http://localhost:1234/v1")
+        #expect(configuration.authentication.isConfigured == true)
+        #expect(configuration.apiVariant == .chatCompletions)
     }
 
     @Test("Ollama endpoint with custom host and port")

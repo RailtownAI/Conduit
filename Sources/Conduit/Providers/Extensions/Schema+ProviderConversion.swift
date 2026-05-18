@@ -10,9 +10,18 @@ import Foundation
 extension GenerationSchema {
 
     /// Converts this GenerationSchema to a JSON schema dictionary for provider APIs.
-    public func toJSONSchema() -> [String: Any] {
+    public func toJSONSchema(options: EncodingOptions = .default) -> [String: Any] {
+        let schema: GenerationSchema
+        switch options.referenceStrategy {
+        case .preserve:
+            schema = self
+        case .inline:
+            schema = withInlinedReferences()
+        }
+
         let encoder = JSONEncoder()
-        let data = (try? encoder.encode(self)) ?? Data()
+        encoder.userInfo[GenerationSchema.omitAdditionalPropertiesKey] = options.omitAdditionalProperties
+        let data = (try? encoder.encode(schema)) ?? Data()
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return [:]
         }
@@ -20,8 +29,11 @@ extension GenerationSchema {
     }
 
     /// Converts this GenerationSchema to a JSON string suitable for embedding in prompts.
-    public func toJSONString(prettyPrinted: Bool = true) -> String {
-        let json = toJSONSchema()
+    public func toJSONString(
+        prettyPrinted: Bool = true,
+        options: EncodingOptions = .default
+    ) -> String {
+        let json = toJSONSchema(options: options)
         guard JSONSerialization.isValidJSONObject(json) else {
             return "{}"
         }

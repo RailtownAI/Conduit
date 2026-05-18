@@ -1,5 +1,5 @@
 import Testing
-import ConduitAdvanced
+import Conduit
 
 @Suite("GenerationGuide Validation")
 struct GenerationGuideValidationTests {

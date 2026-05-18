@@ -3,7 +3,7 @@
 
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 /// Tests for Phase 4: Message Types & Content System
 @Suite("Message Types")

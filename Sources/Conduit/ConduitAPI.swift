@@ -10,6 +10,15 @@ import Foundation
 /// Concise alias for generation options.
 public typealias RunOptions = GenerateConfig
 
+/// Compatibility aliases for macro-generated `Conduit.*` references when the
+/// facade type name shadows the module name inside consumer targets.
+public typealias ConduitGenerable = Generable
+public typealias ConduitGeneratedContent = GeneratedContent
+public typealias ConduitGenerationSchema = GenerationSchema
+public typealias ConduitGenerationID = GenerationID
+public typealias ConduitConvertibleFromGeneratedContent = ConvertibleFromGeneratedContent
+public typealias ConduitConvertibleToGeneratedContent = ConvertibleToGeneratedContent
+
 /// Unified model descriptor used by the facade API.
 public struct Model: Sendable, Hashable, Codable, ExpressibleByStringLiteral {
     public enum Family: String, Sendable, Hashable, Codable, CaseIterable {
@@ -25,6 +34,7 @@ public struct Model: Sendable, Hashable, Codable, ExpressibleByStringLiteral {
         case huggingFace
         case kimi
         case miniMax
+        case gemini
         // MARK: - Custom
         case custom
     }
@@ -51,6 +61,7 @@ public struct Model: Sendable, Hashable, Codable, ExpressibleByStringLiteral {
     public static func coreML(_ path: String) -> Self { .init(path, family: .coreML) }
     public static func kimi(_ id: String) -> Self { .init(id, family: .kimi) }
     public static func miniMax(_ id: String) -> Self { .init(id, family: .miniMax) }
+    public static func gemini(_ id: String) -> Self { .init(id, family: .gemini) }
     public static var foundationModels: Self { .init("apple-foundation-models", family: .foundationModels) }
 }
 
@@ -77,6 +88,8 @@ extension Model {
             self = .kimi(id)
         case .miniMax(let id):
             self = .miniMax(id)
+        case .gemini(let id):
+            self = .gemini(id)
         }
     }
 
@@ -96,6 +109,8 @@ extension Model {
             return .foundationModels
         case .kimi:
             return .kimi(id)
+        case .gemini:
+            return .gemini(id)
         case .openAI, .anthropic, .miniMax, .custom:
             return nil
         }
@@ -406,6 +421,47 @@ extension Provider {
             .openAI(model.id)
         }
     }
+
+    public static func openResponses(
+        apiKey: String,
+        baseURL: URL? = nil,
+        configure: (inout OpenAIOptions) -> Void = { _ in }
+    ) -> Self {
+        var options = OpenAIOptions(api: .responses)
+        configure(&options)
+
+        var configuration = OpenAIConfiguration.openResponses(apiKey: apiKey, baseURL: baseURL)
+        configuration.timeout = max(0, options.timeout)
+        configuration.maxRetries = max(0, options.maxRetries)
+        configuration.defaultHeaders = options.headers
+        configuration.organizationID = options.organizationID
+        let provider = OpenResponsesProvider(configuration: configuration)
+
+        return .custom(provider) { model in
+            .openAI(model.id)
+        }
+    }
+
+    public static func lmStudio(
+        apiKey: String = "lm-studio",
+        baseURL: URL = URL(string: "http://localhost:1234/v1")!,
+        configure: (inout OpenAIOptions) -> Void = { _ in }
+    ) -> Self {
+        var options = OpenAIOptions()
+        configure(&options)
+
+        var configuration = OpenAIConfiguration.lmStudio(baseURL: baseURL, apiKey: apiKey)
+        configuration.timeout = max(0, options.timeout)
+        configuration.maxRetries = max(0, options.maxRetries)
+        configuration.defaultHeaders = options.headers
+        configuration.organizationID = options.organizationID
+        configuration.apiVariant = options.api == .responses ? .responses : .chatCompletions
+        let provider = OpenAIProvider(configuration: configuration)
+
+        return .custom(provider) { model in
+            .openAI(model.id)
+        }
+    }
     #endif
 
     #if CONDUIT_TRAIT_ANTHROPIC
@@ -431,6 +487,24 @@ extension Provider {
 
         return .custom(provider) { model in
             .anthropic(model.id)
+        }
+    }
+    #endif
+
+    #if CONDUIT_TRAIT_GEMINI
+    public static func gemini(
+        apiKey: String,
+        configure: (inout GeminiConfiguration) -> Void = { _ in }
+    ) -> Self {
+        var configuration = GeminiConfiguration(apiKey: apiKey)
+        configure(&configuration)
+        let provider = GeminiProvider(configuration: configuration)
+
+        return .custom(provider) { model in
+            guard model.family == .gemini || model.family == .custom else {
+                throw AIError.invalidInput("Gemini provider requires .gemini(...) models")
+            }
+            return .gemini(model.id)
         }
     }
     #endif
@@ -468,14 +542,12 @@ extension Provider {
 
 /// Top-level concise entry point.
 public struct Conduit: Sendable {
-    // Compatibility aliases for macro-generated `Conduit.*` references when the facade
-    // type name shadows the module name inside consumer targets.
-    public typealias Generable = ConduitAdvanced.Generable
-    public typealias GeneratedContent = ConduitAdvanced.GeneratedContent
-    public typealias GenerationSchema = ConduitAdvanced.GenerationSchema
-    public typealias GenerationID = ConduitAdvanced.GenerationID
-    public typealias ConvertibleFromGeneratedContent = ConduitAdvanced.ConvertibleFromGeneratedContent
-    public typealias ConvertibleToGeneratedContent = ConduitAdvanced.ConvertibleToGeneratedContent
+    public typealias Generable = ConduitGenerable
+    public typealias GeneratedContent = ConduitGeneratedContent
+    public typealias GenerationSchema = ConduitGenerationSchema
+    public typealias GenerationID = ConduitGenerationID
+    public typealias ConvertibleFromGeneratedContent = ConduitConvertibleFromGeneratedContent
+    public typealias ConvertibleToGeneratedContent = ConduitConvertibleToGeneratedContent
 
     public let provider: Provider
 
@@ -498,17 +570,32 @@ public struct Conduit: Sendable {
 
 /// Minimal, stateful conversational interface.
 public struct Session: Sendable {
+    public enum StreamEvent: Sendable {
+        case text(String)
+        case chunk(GenerationChunk)
+        case reasoning([ReasoningDetail])
+        case partialToolCall(PartialToolCall)
+        case toolCalls([Transcript.ToolCall])
+        case toolOutput(Transcript.ToolOutput)
+        case transcriptDelta(Message)
+        case completed(String)
+    }
+
     public struct Options: Sendable {
         public var run: RunOptions
         fileprivate var tools: [any Tool]
+        fileprivate var toolExecutionDelegate: (any ToolExecutionDelegate)?
         fileprivate var toolRetryPolicy: ToolExecutor.RetryPolicy
         fileprivate var maxToolRounds: Int
+        fileprivate var contextReducer: ContextReducer?
 
         public init(run: RunOptions = .default) {
             self.run = run
             self.tools = []
+            self.toolExecutionDelegate = nil
             self.toolRetryPolicy = .none
             self.maxToolRounds = 8
+            self.contextReducer = nil
         }
 
         /// Mutate run options using a closure for concise composition.
@@ -525,8 +612,16 @@ public struct Session: Sendable {
             self.toolRetryPolicy = policy
         }
 
+        public mutating func toolExecutionDelegate(_ delegate: (any ToolExecutionDelegate)?) {
+            self.toolExecutionDelegate = delegate
+        }
+
         public mutating func maxToolRounds(_ value: Int) {
             self.maxToolRounds = max(0, value)
+        }
+
+        public mutating func contextReducer(_ reducer: ContextReducer?) {
+            self.contextReducer = reducer
         }
     }
 
@@ -537,20 +632,38 @@ public struct Session: Sendable {
     }
 
     private let runText: @Sendable (String) async throws -> String
+    private let runTextWithConfig: @Sendable (String, GenerateConfig) async throws -> String
     private let streamText: @Sendable (String) -> AsyncThrowingStream<String, Error>
+    private let streamTextWithConfig: @Sendable (String, GenerateConfig) -> AsyncThrowingStream<String, Error>
+    private let streamEventsText: @Sendable (String) -> AsyncThrowingStream<StreamEvent, Error>
+    private let streamEventsTextWithConfig: @Sendable (String, GenerateConfig) -> AsyncThrowingStream<StreamEvent, Error>
+    private let messagesSnapshot: @Sendable () -> [Message]
+    private let setSystemPrompt: @Sendable (String) -> Void
     private let cancelGeneration: @Sendable () async -> Void
     private let prepareHook: (@Sendable () async throws -> Void)?
     private let releaseHook: (@Sendable () async -> Void)?
 
     private init(
         runText: @escaping @Sendable (String) async throws -> String,
+        runTextWithConfig: @escaping @Sendable (String, GenerateConfig) async throws -> String,
         streamText: @escaping @Sendable (String) -> AsyncThrowingStream<String, Error>,
+        streamTextWithConfig: @escaping @Sendable (String, GenerateConfig) -> AsyncThrowingStream<String, Error>,
+        streamEventsText: @escaping @Sendable (String) -> AsyncThrowingStream<StreamEvent, Error>,
+        streamEventsTextWithConfig: @escaping @Sendable (String, GenerateConfig) -> AsyncThrowingStream<StreamEvent, Error>,
+        messagesSnapshot: @escaping @Sendable () -> [Message],
+        setSystemPrompt: @escaping @Sendable (String) -> Void,
         cancelGeneration: @escaping @Sendable () async -> Void,
         prepareHook: (@Sendable () async throws -> Void)?,
         releaseHook: (@Sendable () async -> Void)?
     ) {
         self.runText = runText
+        self.runTextWithConfig = runTextWithConfig
         self.streamText = streamText
+        self.streamTextWithConfig = streamTextWithConfig
+        self.streamEventsText = streamEventsText
+        self.streamEventsTextWithConfig = streamEventsTextWithConfig
+        self.messagesSnapshot = messagesSnapshot
+        self.setSystemPrompt = setSystemPrompt
         self.cancelGeneration = cancelGeneration
         self.prepareHook = prepareHook
         self.releaseHook = releaseHook
@@ -559,6 +672,11 @@ public struct Session: Sendable {
     @inline(__always)
     public func run(_ prompt: String) async throws -> String {
         try await runText(prompt)
+    }
+
+    @inline(__always)
+    public func run(_ prompt: String, config: GenerateConfig) async throws -> String {
+        try await runTextWithConfig(prompt, config)
     }
 
     /// Runs a prompt and decodes the textual response into a typed value.
@@ -584,6 +702,30 @@ public struct Session: Sendable {
     @inline(__always)
     public func stream(_ prompt: String) -> AsyncThrowingStream<String, Error> {
         streamText(prompt)
+    }
+
+    @inline(__always)
+    public func stream(_ prompt: String, config: GenerateConfig) -> AsyncThrowingStream<String, Error> {
+        streamTextWithConfig(prompt, config)
+    }
+
+    @inline(__always)
+    public func streamEvents(_ prompt: String) -> AsyncThrowingStream<StreamEvent, Error> {
+        streamEventsText(prompt)
+    }
+
+    @inline(__always)
+    public func streamEvents(_ prompt: String, config: GenerateConfig) -> AsyncThrowingStream<StreamEvent, Error> {
+        streamEventsTextWithConfig(prompt, config)
+    }
+
+    fileprivate var messages: [Message] {
+        messagesSnapshot()
+    }
+
+    @inline(__always)
+    public func instructions(_ instructions: Instructions) {
+        setSystemPrompt(instructions.description)
     }
 
     @inline(__always)
@@ -617,19 +759,39 @@ extension Session {
         release: (@Sendable () async -> Void)? = nil
     ) -> Session {
         let session = ChatSession(provider: provider, model: model, config: options.run)
+        session.contextReducer = options.contextReducer
 
         if !options.tools.isEmpty {
             session.toolExecutor = ToolExecutor(tools: options.tools)
             session.toolCallRetryPolicy = options.toolRetryPolicy
             session.maxToolCallRounds = options.maxToolRounds
         }
+        session.toolExecutionDelegate = options.toolExecutionDelegate
 
         return Session(
             runText: { prompt in
                 try await session.send(prompt)
             },
+            runTextWithConfig: { prompt, config in
+                try await session.send(prompt, config: config)
+            },
             streamText: { prompt in
                 session.stream(prompt)
+            },
+            streamTextWithConfig: { prompt, config in
+                session.stream(prompt, config: config)
+            },
+            streamEventsText: { prompt in
+                mapStreamEvents(session.streamEvents(prompt))
+            },
+            streamEventsTextWithConfig: { prompt, config in
+                mapStreamEvents(session.streamEvents(prompt, config: config))
+            },
+            messagesSnapshot: {
+                session.messages
+            },
+            setSystemPrompt: { prompt in
+                session.setSystemPrompt(prompt)
             },
             cancelGeneration: {
                 await session.cancel()
@@ -637,5 +799,363 @@ extension Session {
             prepareHook: prepare,
             releaseHook: release
         )
+    }
+
+    private static func mapStreamEvents<P: AIProvider & TextGenerator>(
+        _ stream: AsyncThrowingStream<ChatSession<P>.StreamEvent, Error>
+    ) -> AsyncThrowingStream<Session.StreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    for try await event in stream {
+                        continuation.yield(mapStreamEvent(event))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func mapStreamEvent<P: AIProvider & TextGenerator>(
+        _ event: ChatSession<P>.StreamEvent
+    ) -> Session.StreamEvent {
+        switch event {
+        case .text(let text):
+            return .text(text)
+        case .chunk(let chunk):
+            return .chunk(chunk)
+        case .reasoning(let details):
+            return .reasoning(details)
+        case .partialToolCall(let partial):
+            return .partialToolCall(partial)
+        case .toolCalls(let calls):
+            return .toolCalls(calls)
+        case .toolOutput(let output):
+            return .toolOutput(output)
+        case .transcriptDelta(let message):
+            return .transcriptDelta(message)
+        case .completed(let text):
+            return .completed(text)
+        }
+    }
+}
+
+// MARK: - FoundationModels Familiar Compatibility
+
+/// Conflict-safe language model descriptor for FoundationModels-familiar call sites.
+///
+/// `ConduitLanguageModel` is a small compatibility facade over Conduit's existing
+/// `Provider` and `Model` runtime types. It does not replace provider selection,
+/// capability modeling, or `Session`/`ChatSession`.
+public struct ConduitLanguageModel: Sendable {
+    fileprivate let provider: Provider
+    fileprivate let model: Model
+
+    public init(provider: Provider, model: Model) {
+        self.provider = provider
+        self.model = model
+    }
+}
+
+/// FoundationModels-familiar session facade backed by Conduit's existing session machinery.
+public final class ConduitLanguageModelSession: @unchecked Sendable {
+    public struct Response<Content: Sendable>: Sendable {
+        public let content: Content
+        public let rawContent: GeneratedContent
+
+        public init(content: Content, rawContent: GeneratedContent) {
+            self.content = content
+            self.rawContent = rawContent
+        }
+    }
+
+    public struct ResponseStream<Content: Generable>: AsyncSequence, Sendable {
+        public struct Snapshot: Sendable {
+            public let content: Content.PartiallyGenerated
+            public let rawContent: GeneratedContent
+
+            public init(content: Content.PartiallyGenerated, rawContent: GeneratedContent) {
+                self.content = content
+                self.rawContent = rawContent
+            }
+        }
+
+        public typealias Element = Snapshot
+
+        private let stream: AsyncThrowingStream<Snapshot, Error>
+
+        fileprivate init(_ stream: AsyncThrowingStream<Snapshot, Error>) {
+            self.stream = stream
+        }
+
+        public func makeAsyncIterator() -> AsyncThrowingStream<Snapshot, Error>.Iterator {
+            stream.makeAsyncIterator()
+        }
+    }
+
+    private let session: Session
+    private let baseGenerateConfig: GenerateConfig
+    private let lock = NSLock()
+    private var storedTranscript: Transcript
+    private var syncedMessageCount: Int
+
+    public var transcript: Transcript {
+        withLock { storedTranscript }
+    }
+
+    public init(
+        model: ConduitLanguageModel,
+        tools: [any Tool] = [],
+        instructions: Instructions? = nil
+    ) throws {
+        var options = Session.Options()
+        if !tools.isEmpty {
+            options.tools { tools }
+            options.run = options.run.tools(tools)
+        }
+        self.session = try model.provider.makeSession(model.model, options)
+        self.baseGenerateConfig = options.run
+        self.storedTranscript = Transcript()
+        self.syncedMessageCount = self.session.messages.count
+
+        if let instructions {
+            self.session.instructions(instructions)
+            self.syncedMessageCount = self.session.messages.count
+            appendInstructions(instructions, tools: tools)
+        } else if !tools.isEmpty {
+            appendInstructions(Instructions(""), tools: tools)
+        }
+    }
+
+    public convenience init(
+        model: ConduitLanguageModel,
+        tools: [any Tool] = [],
+        instructions: String
+    ) throws {
+        try self.init(model: model, tools: tools, instructions: Instructions(instructions))
+    }
+
+    public func respond(
+        to prompt: some PromptRepresentable,
+        options: GenerationOptions = GenerationOptions()
+    ) async throws -> Response<String> {
+        let promptEntry = makePromptEntry(prompt, options: options, responseFormat: nil)
+        append(.prompt(promptEntry))
+
+        let text = try await session.run(promptEntry.textContent, config: promptEntry.generateConfig(base: baseGenerateConfig))
+        let content = text.generatedContent
+        appendToolEntriesFromSessionMessages()
+        append(.response(Transcript.Response(
+            assetIDs: [],
+            segments: [.text(Transcript.TextSegment(content: text))]
+        )))
+
+        return Response(content: text, rawContent: content)
+    }
+
+    public func respond<Content: Generable>(
+        to prompt: some PromptRepresentable,
+        generating type: Content.Type,
+        options: GenerationOptions = GenerationOptions()
+    ) async throws -> Response<Content> {
+        let responseFormat = Transcript.ResponseFormat(type: type)
+        let promptEntry = makePromptEntry(prompt, options: options, responseFormat: responseFormat)
+        append(.prompt(promptEntry))
+
+        let text = try await session.run(promptEntry.textContent, config: promptEntry.generateConfig(base: baseGenerateConfig))
+        let rawContent = try Self.decodeGeneratedContent(text, as: type)
+        let value = try Self.decodeGeneratedValue(rawContent, as: type)
+
+        appendToolEntriesFromSessionMessages()
+        append(.response(Transcript.Response(
+            assetIDs: [],
+            segments: [.structure(Transcript.StructuredSegment(source: String(describing: type), content: rawContent))]
+        )))
+
+        return Response(content: value, rawContent: rawContent)
+    }
+
+    public func streamResponse(
+        to prompt: some PromptRepresentable,
+        options: GenerationOptions = GenerationOptions()
+    ) -> ResponseStream<String> {
+        streamResponse(to: prompt, generating: String.self, options: options)
+    }
+
+    public func streamResponse<Content: Generable>(
+        to prompt: some PromptRepresentable,
+        generating type: Content.Type,
+        options: GenerationOptions = GenerationOptions()
+    ) -> ResponseStream<Content> {
+        let responseFormat = type == String.self ? nil : Transcript.ResponseFormat(type: type)
+        let promptEntry = makePromptEntry(prompt, options: options, responseFormat: responseFormat)
+        append(.prompt(promptEntry))
+
+        let stream = AsyncThrowingStream<ResponseStream<Content>.Snapshot, Error> { continuation in
+            Task { [session] in
+                var buffer = ""
+
+                do {
+                    for try await event in session.streamEvents(promptEntry.textContent, config: promptEntry.generateConfig(base: baseGenerateConfig)) {
+                        switch event {
+                        case .text(let fragment):
+                            buffer += fragment
+
+                            guard let rawContent = try Self.partialGeneratedContent(from: buffer, type: type) else {
+                                continue
+                            }
+
+                            let value = try Content.PartiallyGenerated(rawContent)
+                            continuation.yield(ResponseStream<Content>.Snapshot(content: value, rawContent: rawContent))
+
+                        case .toolCalls(let calls):
+                            self.append(.toolCalls(Transcript.ToolCalls(calls)))
+
+                        case .toolOutput(let output):
+                            self.append(.toolOutput(output))
+
+                        case .chunk, .reasoning, .partialToolCall, .transcriptDelta, .completed:
+                            continue
+                        }
+                    }
+
+                    if type == String.self {
+                        self.append(.response(Transcript.Response(
+                            assetIDs: [],
+                            segments: [.text(Transcript.TextSegment(content: buffer))]
+                        )))
+                    } else {
+                        let rawContent = try Self.decodeGeneratedContent(buffer, as: type)
+                        self.append(.response(Transcript.Response(
+                            assetIDs: [],
+                            segments: [
+                                .structure(Transcript.StructuredSegment(
+                                    source: String(describing: type),
+                                    content: rawContent
+                                ))
+                            ]
+                        )))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+
+        return ResponseStream(stream)
+    }
+
+    private func makePromptEntry(
+        _ prompt: some PromptRepresentable,
+        options: GenerationOptions,
+        responseFormat: Transcript.ResponseFormat?
+    ) -> Transcript.Prompt {
+        Transcript.Prompt(
+            segments: [.text(Transcript.TextSegment(content: prompt.promptRepresentation.description))],
+            options: options,
+            responseFormat: responseFormat
+        )
+    }
+
+    private func appendInstructions(_ instructions: Instructions, tools: [any Tool]) {
+        let segments: [Transcript.Segment]
+        if instructions.description.isEmpty {
+            segments = []
+        } else {
+            segments = [.text(Transcript.TextSegment(content: instructions.description))]
+        }
+        append(.instructions(Transcript.Instructions(
+            segments: segments,
+            toolDefinitions: tools.map { Transcript.ToolDefinition(tool: $0) }
+        )))
+    }
+
+    private func appendToolEntriesFromSessionMessages() {
+        let messages = session.messages
+        let syncedCount = withLock { syncedMessageCount }
+        let newMessages = messages.dropFirst(syncedCount)
+
+        for message in newMessages {
+            switch message.role {
+            case .assistant:
+                if let toolCalls = message.metadata?.toolCalls, !toolCalls.isEmpty {
+                    append(.toolCalls(Transcript.ToolCalls(toolCalls)))
+                }
+            case .tool:
+                let callID = message.metadata?.custom?["tool_call_id"] ?? UUID().uuidString
+                let toolName = message.metadata?.custom?["tool_name"] ?? "tool"
+                append(.toolOutput(Transcript.ToolOutput(
+                    id: callID,
+                    toolName: toolName,
+                    segments: [.text(Transcript.TextSegment(content: message.content.textValue))]
+                )))
+            case .system, .user:
+                continue
+            }
+        }
+
+        withLock {
+            syncedMessageCount = messages.count
+        }
+    }
+
+    private func append(_ entry: Transcript.Entry) {
+        withLock {
+            storedTranscript.append(entry)
+        }
+    }
+
+    private func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+
+    private static func partialGeneratedContent<Content: Generable>(
+        from text: String,
+        type: Content.Type
+    ) throws -> GeneratedContent? {
+        if type == String.self {
+            return text.generatedContent
+        }
+        return try? GeneratedContent(json: text)
+    }
+
+    private static func decodeGeneratedContent<Content: Generable>(
+        _ text: String,
+        as type: Content.Type
+    ) throws -> GeneratedContent {
+        do {
+            if type == String.self {
+                return text.generatedContent
+            }
+            return try GeneratedContent(json: text)
+        } catch {
+            throw AIError.invalidInput(
+                "Failed to decode response as \(String(describing: type)): \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private static func decodeGeneratedValue<Content: Generable>(
+        _ content: GeneratedContent,
+        as type: Content.Type
+    ) throws -> Content {
+        do {
+            return try Content(content)
+        } catch {
+            throw AIError.invalidInput(
+                "Failed to decode response as \(String(describing: type)): \(error.localizedDescription)"
+            )
+        }
+    }
+}
+
+extension Transcript.Prompt {
+    fileprivate var textContent: String {
+        segments.map(\.description).joined(separator: "\n")
     }
 }

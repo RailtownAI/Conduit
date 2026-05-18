@@ -1,5 +1,5 @@
 import Testing
-import ConduitAdvanced
+import Conduit
 import Foundation
 
 @Generable

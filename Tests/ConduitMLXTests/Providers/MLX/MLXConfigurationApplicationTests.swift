@@ -5,7 +5,7 @@
 
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 #if CONDUIT_TRAIT_MLX && canImport(MLX)
 @preconcurrency import MLXLMCommon

@@ -5,7 +5,7 @@
 
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 // MARK: - Mock Tools
 
@@ -234,6 +234,33 @@ struct ToolExecutorTests {
             #expect(anotherDef?.description == "Another mock tool for testing")
         }
 
+        @Test("Register dynamic MCP-style tool with runtime schema")
+        func registerDynamicToolWithRuntimeSchema() async throws {
+            let schema = try GenerationSchema(
+                root: DynamicGenerationSchema(
+                    name: "SearchArguments",
+                    properties: [
+                        .init(name: "query", schema: .init(type: String.self))
+                    ]
+                ),
+                dependencies: []
+            )
+            let tool = DynamicTool(
+                name: "mcp_search",
+                description: "Searches an MCP server.",
+                parameters: schema
+            ) { arguments in
+                let query = try arguments.value(String.self, forProperty: "query")
+                return GeneratedContent(properties: ["result": "Found \(query)"])
+            }
+            let executor = ToolExecutor(tools: [tool])
+
+            let definitions = await executor.toolDefinitions
+            #expect(definitions.count == 1)
+            #expect(definitions.first?.name == "mcp_search")
+            #expect(definitions.first?.parameters.toJSONString().contains("SearchArguments") == true)
+        }
+
         @Test("Replace existing tool with same name")
         func replaceExistingTool() async {
             let executor = ToolExecutor()
@@ -298,6 +325,39 @@ struct ToolExecutorTests {
             #expect(output.id == "call_456")
             #expect(output.toolName == "another_tool")
             #expect(output.text == "Value doubled: 42")
+        }
+
+        @Test("Execute dynamic tool with GeneratedContent arguments")
+        func executeDynamicToolWithGeneratedContentArguments() async throws {
+            let schema = try GenerationSchema(
+                root: DynamicGenerationSchema(
+                    name: "DynamicArgs",
+                    properties: [
+                        .init(name: "input", schema: .init(type: String.self))
+                    ]
+                ),
+                dependencies: []
+            )
+            let tool = DynamicTool(
+                name: "dynamic_echo",
+                description: "Echoes dynamic input.",
+                parameters: schema
+            ) { arguments in
+                let input = try arguments.value(String.self, forProperty: "input")
+                return GeneratedContent(properties: ["message": "Dynamic: \(input)"])
+            }
+            let executor = ToolExecutor(tools: [tool])
+            let toolCall = try Transcript.ToolCall(
+                id: "call_dynamic",
+                toolName: "dynamic_echo",
+                argumentsJSON: #"{"input":"hello"}"#
+            )
+
+            let output = try await executor.execute(toolCall: toolCall)
+
+            #expect(output.id == "call_dynamic")
+            #expect(output.toolName == "dynamic_echo")
+            #expect(output.text.contains(#""message":"Dynamic: hello""#))
         }
 
         @Test("Execute non-existent tool throws toolNotFound")

@@ -14,8 +14,18 @@ extension Transcript.ToolCall {
     ///   - toolName: The name of the tool to invoke.
     ///   - argumentsJSON: The JSON string containing the arguments.
     /// - Throws: `GeneratedContentError.typeMismatch` if the JSON string cannot be parsed.
-    public init(id: String, toolName: String, argumentsJSON: String) throws {
-        self.init(id: id, toolName: toolName, arguments: try GeneratedContent(json: argumentsJSON))
+    public init(
+        id: String,
+        toolName: String,
+        argumentsJSON: String,
+        metadata: [String: JSONValue] = [:]
+    ) throws {
+        self.init(
+            id: id,
+            toolName: toolName,
+            arguments: try GeneratedContent(json: argumentsJSON),
+            metadata: metadata
+        )
     }
 
     /// Returns the arguments serialized as JSON Data.

@@ -113,6 +113,9 @@ public enum ProviderType: String, Sendable, Codable, CaseIterable {
     /// Best for: Coding, agentic workflows, cost-effective inference.
     case minimax
 
+    /// Google Gemini native API (cloud).
+    case gemini
+
     /// Azure OpenAI Service (cloud).
     ///
     /// Microsoft's enterprise OpenAI deployment.
@@ -144,6 +147,8 @@ public enum ProviderType: String, Sendable, Codable, CaseIterable {
             return "Kimi"
         case .minimax:
             return "MiniMax"
+        case .gemini:
+            return "Gemini"
         case .azure:
             return "Azure OpenAI"
         }
@@ -157,7 +162,7 @@ public enum ProviderType: String, Sendable, Codable, CaseIterable {
         switch self {
         case .mlx, .coreml, .llama, .foundationModels, .ollama:
             return false
-        case .huggingFace, .openAI, .openRouter, .anthropic, .kimi, .azure, .minimax:
+        case .huggingFace, .openAI, .openRouter, .anthropic, .kimi, .azure, .minimax, .gemini:
             return true
         }
     }

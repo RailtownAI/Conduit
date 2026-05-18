@@ -4,7 +4,7 @@
 // This file requires the MLX trait to be enabled.
 
 import XCTest
-@testable import ConduitAdvanced
+@testable import Conduit
 
 #if CONDUIT_TRAIT_MLX && canImport(MLX) && canImport(StableDiffusion)
 import StableDiffusion

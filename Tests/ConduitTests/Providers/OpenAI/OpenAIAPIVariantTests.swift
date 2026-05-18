@@ -6,7 +6,7 @@
 #if CONDUIT_TRAIT_OPENAI || CONDUIT_TRAIT_OPENROUTER
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Generable
 private struct ResponsesWeatherArgs {
@@ -133,12 +133,57 @@ struct OpenAIAPIVariantTests {
         #expect(result.usage?.completionTokens == 4)
     }
 
+    @Test("Responses parser maps incomplete status reasons")
+    func responsesParserMapsIncompleteStatusReasons() async throws {
+        let provider = OpenAIProvider(configuration: .openAI(apiKey: "sk-test").apiVariant(.responses))
+
+        let payload: [String: Any] = [
+            "id": "resp_incomplete",
+            "status": "incomplete",
+            "incomplete_details": ["reason": "max_output_tokens"],
+            "output": [
+                [
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        ["type": "output_text", "text": "Partial"]
+                    ]
+                ]
+            ]
+        ]
+
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let result = try await provider.parseGenerationResponse(data: data, variant: .responses)
+
+        #expect(result.text == "Partial")
+        #expect(result.finishReason == .maxTokens)
+    }
+
+    @Test("Responses parser throws failed response status")
+    func responsesParserThrowsFailedStatus() async throws {
+        let provider = OpenAIProvider(configuration: .openAI(apiKey: "sk-test").apiVariant(.responses))
+        let payload: [String: Any] = [
+            "id": "resp_failed",
+            "status": "failed",
+            "error": [
+                "message": "model failed"
+            ],
+            "output": []
+        ]
+
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        await #expect(throws: AIError.self) {
+            _ = try await provider.parseGenerationResponse(data: data, variant: .responses)
+        }
+    }
+
     @Test("Responses parser extracts function_call output as tool call")
     func responsesParserExtractsToolCall() async throws {
         let provider = OpenAIProvider(configuration: .openAI(apiKey: "sk-test").apiVariant(.responses))
 
         let payload: [String: Any] = [
             "id": "resp_456",
+            "status": "completed",
             "output": [
                 [
                     "type": "function_call",
@@ -148,7 +193,6 @@ struct OpenAIAPIVariantTests {
                     "arguments": #"{"city":"SF"}"#
                 ]
             ],
-            "finish_reason": "tool_calls",
             "usage": [
                 "input_tokens": 11,
                 "output_tokens": 7
@@ -181,6 +225,16 @@ struct OpenAIAPIVariantTests {
         #expect(completionEvent?.finishReason == .stop)
         #expect(completionEvent?.usage?.promptTokens == 3)
         #expect(completionEvent?.usage?.completionTokens == 2)
+
+        let incompleteEvent = provider.decodeResponsesEventData(
+            #"{"type":"response.completed","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}"#
+        )
+        #expect(incompleteEvent?.finishReason == .maxTokens)
+
+        let completedWithoutFinishReason = provider.decodeResponsesEventData(
+            #"{"type":"response.completed","response":{"status":"completed"}}"#
+        )
+        #expect(completedWithoutFinishReason?.finishReason == nil)
     }
 }
 

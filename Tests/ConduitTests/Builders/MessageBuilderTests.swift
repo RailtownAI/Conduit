@@ -2,7 +2,7 @@
 // ConduitTests
 
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Suite("MessageBuilder Tests")
 struct MessageBuilderTests {

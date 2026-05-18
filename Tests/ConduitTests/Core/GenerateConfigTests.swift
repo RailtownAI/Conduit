@@ -2,12 +2,22 @@
 // Conduit Tests
 
 import XCTest
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Generable
 private struct PromptBridgeFixture {
     let answer: String
 }
+
+private enum CustomOptionProviderA {}
+private enum CustomOptionProviderB {}
+
+private struct CustomOptionPayload: Codable, Sendable, Equatable {
+    var effort: String
+    var budget: Int
+}
+
+private func acceptsSendableConfig<T: Sendable>(_ value: T) {}
 
 /// Comprehensive test suite for GenerateConfig.
 ///
@@ -284,6 +294,63 @@ final class GenerateConfigTests: XCTestCase {
         XCTAssertEqual(decoded.maxTokens, 800)
         XCTAssertEqual(decoded.temperature, 0.6, accuracy: 0.001)
         XCTAssertEqual(decoded.stopSequences, ["DONE"])
+    }
+
+    func testTypedCustomOptionsSetGetRemoveAndIsolation() throws {
+        var config = GenerateConfig.default
+        let options = CustomOptionPayload(effort: "high", budget: 128)
+
+        config[custom: CustomOptionProviderA.self] = options
+
+        let providerAOptions: CustomOptionPayload? = config[custom: CustomOptionProviderA.self]
+        let providerBOptions: CustomOptionPayload? = config[custom: CustomOptionProviderB.self]
+        XCTAssertEqual(providerAOptions, options)
+        XCTAssertNil(providerBOptions)
+
+        config[custom: CustomOptionProviderA.self] = Optional<CustomOptionPayload>.none
+        let removed: CustomOptionPayload? = config[custom: CustomOptionProviderA.self]
+        XCTAssertNil(removed)
+    }
+
+    func testTypedCustomOptionsCodableRoundTrip() throws {
+        var original = GenerateConfig.default.maxTokens(321)
+        original[custom: CustomOptionProviderA.self] = CustomOptionPayload(effort: "medium", budget: 64)
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(GenerateConfig.self, from: data)
+
+        let options: CustomOptionPayload? = decoded[custom: CustomOptionProviderA.self]
+        XCTAssertEqual(options, CustomOptionPayload(effort: "medium", budget: 64))
+        XCTAssertEqual(decoded.maxTokens, 321)
+    }
+
+    func testTypedCustomOptionsDecodeOldJSONWithoutOptions() throws {
+        let json = """
+        {
+          "maxTokens": 123,
+          "temperature": 0.7,
+          "topP": 0.9,
+          "repetitionPenalty": 1.0,
+          "frequencyPenalty": 0.0,
+          "presencePenalty": 0.0,
+          "stopSequences": [],
+          "returnLogprobs": false,
+          "tools": [],
+          "toolChoice": { "auto": {} }
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(GenerateConfig.self, from: Data(json.utf8))
+        let options: CustomOptionPayload? = decoded[custom: CustomOptionProviderA.self]
+
+        XCTAssertEqual(decoded.maxTokens, 123)
+        XCTAssertNil(options)
+    }
+
+    func testGenerateConfigWithTypedCustomOptionsIsSendable() {
+        var config = GenerateConfig.default
+        config[custom: CustomOptionProviderA.self] = CustomOptionPayload(effort: "low", budget: 8)
+        acceptsSendableConfig(config)
     }
 
     // MARK: - Equatable Tests

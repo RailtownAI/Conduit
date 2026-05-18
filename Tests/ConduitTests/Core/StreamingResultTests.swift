@@ -5,7 +5,7 @@
 
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 // MARK: - Test Generable Type
 

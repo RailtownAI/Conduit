@@ -2,7 +2,7 @@
 // ConduitTests
 
 import XCTest
-@testable import ConduitAdvanced
+@testable import Conduit
 
 final class ProviderRuntimeCapabilitiesTests: XCTestCase {
     func testFeatureFlagsDefaultEnabled() {

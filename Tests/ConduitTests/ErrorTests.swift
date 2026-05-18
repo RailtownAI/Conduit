@@ -2,7 +2,7 @@
 // Conduit
 
 import XCTest
-@testable import ConduitAdvanced
+@testable import Conduit
 
 final class ErrorTests: XCTestCase {
 

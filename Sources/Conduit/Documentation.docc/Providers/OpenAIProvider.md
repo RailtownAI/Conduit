@@ -21,6 +21,27 @@ let provider = OpenAIProvider(apiKey: "sk-...")
 let response = try await provider.generate("Hello", model: .gpt4o)
 ```
 
+### Responses API
+
+Use the first-class Responses wrapper when targeting OpenAI or OpenRouter-compatible Responses endpoints:
+
+```swift
+let provider = OpenResponsesProvider(
+    configuration: .openResponses(apiKey: apiKey)
+)
+
+var config = GenerateConfig.default
+config[custom: OpenResponsesProvider.self] = OpenResponsesOptions(
+    toolChoice: "auto",
+    reasoning: ["effort": "low"],
+    verbosity: "medium",
+    truncation: "auto",
+    metadata: ["surface": "ios"]
+)
+```
+
+The typed options map to Responses-owned request fields such as `tool_choice`, `reasoning`, `text.verbosity`, `truncation`, `metadata`, allowed tools, and provider-owned extra body fields.
+
 ### Available Models
 
 | Model | ID | Best For |
@@ -137,6 +158,8 @@ let response = try await provider.generate(
     model: .ollama("llama3.2")
 )
 ```
+
+Use ``OllamaProvider`` when you need native local-runtime APIs such as `/api/tags`, `/api/show`, `/api/pull`, or `/api/version`. Keep ``OpenAIProvider`` with `.ollama()` for the simple OpenAI-compatible chat path.
 
 ### Ollama Configuration
 

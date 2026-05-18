@@ -48,7 +48,7 @@ if includeMLXImageDependencies {
     )
 }
 
-var conduitAdvancedDependencies: [Target.Dependency] = [
+var conduitDependencies: [Target.Dependency] = [
     "ConduitMacros",
     .product(name: "OrderedCollections", package: "swift-collections"),
     .product(name: "Numerics", package: "swift-numerics"),
@@ -60,7 +60,7 @@ var conduitAdvancedDependencies: [Target.Dependency] = [
 ]
 
 if includeMLXDependencies {
-    conduitAdvancedDependencies.append(
+    conduitDependencies.append(
         contentsOf: [
             .product(name: "MLX", package: "mlx-swift", condition: .when(traits: ["MLX"])),
             .product(name: "MLXLMCommon", package: "mlx-swift-lm", condition: .when(traits: ["MLX"])),
@@ -73,20 +73,18 @@ if includeMLXDependencies {
 }
 
 if includeMLXImageDependencies {
-    conduitAdvancedDependencies.append(
+    conduitDependencies.append(
         .product(name: "StableDiffusion", package: "mlx-swift-examples", condition: .when(traits: ["MLX"]))
     )
 }
 
 var conduitTestDependencies: [Target.Dependency] = [
     "Conduit",
-    "ConduitAdvanced",
     .product(name: "Numerics", package: "swift-numerics"),
 ]
 
 var conduitMLXTestDependencies: [Target.Dependency] = [
     "Conduit",
-    "ConduitAdvanced",
 ]
 
 if includeMLXDependencies {
@@ -135,10 +133,6 @@ let package = Package(
             name: "Conduit",
             targets: ["Conduit"]
         ),
-        .library(
-            name: "ConduitAdvanced",
-            targets: ["ConduitAdvanced"]
-        ),
     ],
     traits: [
         .trait(
@@ -160,6 +154,14 @@ let package = Package(
         .trait(
             name: "MiniMax",
             description: "Enable MiniMax provider support (OpenAI-compatible)"
+        ),
+        .trait(
+            name: "Gemini",
+            description: "Enable Google Gemini native API provider support"
+        ),
+        .trait(
+            name: "Ollama",
+            description: "Enable native Ollama local runtime management support"
         ),
         .trait(
             name: "MLX",
@@ -195,8 +197,8 @@ let package = Package(
             ]
         ),
         .target(
-            name: "ConduitAdvanced",
-            dependencies: conduitAdvancedDependencies,
+            name: "Conduit",
+            dependencies: conduitDependencies,
             path: "Sources/Conduit",
             swiftSettings: [
                 .define("CONDUIT_TRAIT_OPENAI", .when(traits: ["OpenAI"])),
@@ -204,23 +206,8 @@ let package = Package(
                 .define("CONDUIT_TRAIT_ANTHROPIC", .when(traits: ["Anthropic"])),
                 .define("CONDUIT_TRAIT_KIMI", .when(traits: ["Kimi"])),
                 .define("CONDUIT_TRAIT_MINIMAX", .when(traits: ["MiniMax"])),
-                .define("CONDUIT_TRAIT_MLX", .when(traits: ["MLX"])),
-                .define("CONDUIT_TRAIT_COREML", .when(traits: ["CoreML"])),
-                .enableExperimentalFeature("StrictConcurrency")
-            ]
-        ),
-        .target(
-            name: "Conduit",
-            dependencies: [
-                "ConduitAdvanced"
-            ],
-            path: "Sources/ConduitFacade",
-            swiftSettings: [
-                .define("CONDUIT_TRAIT_OPENAI", .when(traits: ["OpenAI"])),
-                .define("CONDUIT_TRAIT_OPENROUTER", .when(traits: ["OpenRouter"])),
-                .define("CONDUIT_TRAIT_ANTHROPIC", .when(traits: ["Anthropic"])),
-                .define("CONDUIT_TRAIT_KIMI", .when(traits: ["Kimi"])),
-                .define("CONDUIT_TRAIT_MINIMAX", .when(traits: ["MiniMax"])),
+                .define("CONDUIT_TRAIT_GEMINI", .when(traits: ["Gemini"])),
+                .define("CONDUIT_TRAIT_OLLAMA", .when(traits: ["Ollama"])),
                 .define("CONDUIT_TRAIT_MLX", .when(traits: ["MLX"])),
                 .define("CONDUIT_TRAIT_COREML", .when(traits: ["CoreML"])),
                 .enableExperimentalFeature("StrictConcurrency")
@@ -236,6 +223,8 @@ let package = Package(
                 .define("CONDUIT_TRAIT_ANTHROPIC", .when(traits: ["Anthropic"])),
                 .define("CONDUIT_TRAIT_KIMI", .when(traits: ["Kimi"])),
                 .define("CONDUIT_TRAIT_MINIMAX", .when(traits: ["MiniMax"])),
+                .define("CONDUIT_TRAIT_GEMINI", .when(traits: ["Gemini"])),
+                .define("CONDUIT_TRAIT_OLLAMA", .when(traits: ["Ollama"])),
                 .define("CONDUIT_TRAIT_MLX", .when(traits: ["MLX"])),
                 .define("CONDUIT_TRAIT_COREML", .when(traits: ["CoreML"])),
                 .unsafeFlags(["-module-cache-path", swiftModuleCachePath]),
@@ -253,6 +242,8 @@ let package = Package(
                 .define("CONDUIT_TRAIT_ANTHROPIC", .when(traits: ["Anthropic"])),
                 .define("CONDUIT_TRAIT_KIMI", .when(traits: ["Kimi"])),
                 .define("CONDUIT_TRAIT_MINIMAX", .when(traits: ["MiniMax"])),
+                .define("CONDUIT_TRAIT_GEMINI", .when(traits: ["Gemini"])),
+                .define("CONDUIT_TRAIT_OLLAMA", .when(traits: ["Ollama"])),
                 .define("CONDUIT_TRAIT_MLX", .when(traits: ["MLX"])),
                 .define("CONDUIT_TRAIT_COREML", .when(traits: ["CoreML"])),
                 .unsafeFlags(["-module-cache-path", swiftModuleCachePath]),
@@ -262,7 +253,7 @@ let package = Package(
         .testTarget(
             name: "ConduitMacrosTests",
             dependencies: [
-                "ConduitAdvanced",
+                "Conduit",
                 "ConduitMacros",
                 .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
             ],

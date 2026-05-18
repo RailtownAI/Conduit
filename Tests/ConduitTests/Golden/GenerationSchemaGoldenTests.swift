@@ -1,5 +1,5 @@
 import XCTest
-@testable import ConduitAdvanced
+@testable import Conduit
 
 final class GenerationSchemaGoldenTests: XCTestCase {
 
@@ -134,6 +134,27 @@ final class GenerationSchemaGoldenTests: XCTestCase {
         let defs = try XCTUnwrap(object["$defs"] as? [String: Any])
         let book = try XCTUnwrap(defs["ConduitTests.GenerationSchemaGoldenTests.Book"] as? [String: Any])
         XCTAssertNil(book["additionalProperties"])
+    }
+
+    func testInlineReferenceEncodingRemovesDefsAndRefs() throws {
+        let schemaJSON = Book.generationSchema.toJSONString(
+            prettyPrinted: false,
+            options: .inlineReferences
+        )
+        let object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(schemaJSON.utf8)) as? [String: Any]
+        )
+
+        XCTAssertNil(object["$defs"])
+        XCTAssertNil(object["$ref"])
+        XCTAssertEqual(object["type"] as? String, "object")
+
+        let properties = try XCTUnwrap(object["properties"] as? [String: Any])
+        let tags = try XCTUnwrap(properties["tags"] as? [String: Any])
+        XCTAssertNil(tags["$ref"])
+        XCTAssertEqual(tags["type"] as? String, "array")
+        XCTAssertEqual(tags["minItems"] as? Int, 0)
+        XCTAssertEqual(tags["maxItems"] as? Int, 10)
     }
 
     func testGuidedReferencesDoNotCollideAcrossSameUnderlyingType() {

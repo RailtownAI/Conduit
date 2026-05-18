@@ -7,7 +7,7 @@
 
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 // MARK: - Model Loading Error Tests
 

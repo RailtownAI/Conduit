@@ -13,16 +13,12 @@ Kimi, MiniMax, HuggingFace, MLX, CoreML, llama.cpp, and Apple Foundation Models)
 - Platforms: iOS 17+, macOS 14+, visionOS 1+, Linux (cloud providers only)
 - License: MIT
 
-The package is deliberately split into two products so end users can opt into a
-minimal surface or the full implementation:
+The package exposes one public product:
 
-- `Conduit` — the **facade** product (`Sources/ConduitFacade/ConduitFacade.swift`).
-  Exposes the small, agent-friendly API: `Conduit`, `Provider`, `Session`,
-  `Model`, `RunOptions`, `ToolSetBuilder`.
-- `ConduitAdvanced` — the full implementation surface
-  (`Sources/Conduit/` — note: the directory named `Conduit` maps to the
-  `ConduitAdvanced` target in `Package.swift`). Use when callers need direct
-  provider actors, protocols, and low-level controls.
+- `Conduit` — the canonical public API and full implementation surface
+  (`Sources/Conduit/`). It exposes the small, agent-friendly facade types
+  (`Conduit`, `Provider`, `Session`, `Model`, `RunOptions`, `ToolSetBuilder`)
+  alongside direct provider actors, protocols, and low-level controls.
 - `ConduitMacros` — the Swift macro compiler plugin (`@Generable`, `@Guide`).
 
 ## Repository Layout
@@ -31,7 +27,7 @@ minimal surface or the full implementation:
 .
 ├── Package.swift                 # SPM manifest, traits, targets
 ├── Sources/
-│   ├── Conduit/                  # → target: ConduitAdvanced (full surface)
+│   ├── Conduit/                  # → target: Conduit (full surface)
 │   │   ├── Conduit.swift         # version + re-export markers
 │   │   ├── ConduitAPI.swift      # facade-style `Conduit`/`Provider`/`Session`
 │   │   ├── ChatSession.swift     # @Observable stateful multi-turn session
@@ -62,8 +58,6 @@ minimal surface or the full implementation:
 │   │   ├── Services/             # HFMetadataService, VLMDetector, MLX checks
 │   │   ├── Utilities/            # JsonRepair, PartialJSONDecoder, SSEParser, GlobMatcher
 │   │   └── Documentation.docc/   # DocC catalog
-│   ├── ConduitFacade/
-│   │   └── ConduitFacade.swift   # → target: Conduit (thin facade re-exports)
 │   └── ConduitMacros/
 │       ├── ConduitMacrosPlugin.swift
 │       ├── GenerableMacro.swift  # @Generable expansion
@@ -87,10 +81,9 @@ minimal surface or the full implementation:
 └── README.md
 ```
 
-> Important path gotcha: `Package.swift` places the `ConduitAdvanced` target at
-> `path: "Sources/Conduit"`, and the `Conduit` target at `path: "Sources/ConduitFacade"`.
-> **The directory name does not match the target name.** When adding files, make sure
-> they land under the correct directory for the target you mean to modify.
+> Important path note: `Package.swift` places the canonical `Conduit` target at
+> `path: "Sources/Conduit"`. New public API and implementation files should land
+> under that directory unless they belong to the macro target.
 
 ## Build, Test, Lint
 
@@ -191,7 +184,7 @@ Note for doc/example updates (from `AGENTS.md`): current API names are
 `GeneratedContent`, `GenerationSchema`, `Tool`, `Transcript`. **Do not**
 reintroduce legacy terms like `StructuredContent`, `Schema`, or `AITool`.
 
-### Facade API (`Sources/Conduit/ConduitAPI.swift` + `Sources/ConduitFacade/ConduitFacade.swift`)
+### Facade API (`Sources/Conduit/ConduitAPI.swift`)
 Canonical surface for agents and human callers:
 
 ```swift
@@ -236,9 +229,9 @@ cancellation via `cancel()`, and an opt-in `WarmupConfig` (`.default` or
 2. **Traits gate providers.** Any new provider code must live behind its
    `CONDUIT_TRAIT_*` flag (and `canImport(...)` where needed). Do not import
    provider-specific SDKs from trait-agnostic files.
-3. **Module layout.** Do not move files between `Sources/Conduit/` (the
-   `ConduitAdvanced` target) and `Sources/ConduitFacade/` (the `Conduit`
-   target) without understanding the facade/advanced split.
+3. **Module layout.** `Sources/Conduit/` is the canonical public target. Keep
+   public API and implementation in that target unless a file belongs to
+   `ConduitMacros`.
 4. **Linux must keep building.** Cloud providers, utilities, and macros must
    compile on Linux. MLX, CoreML, and Foundation Models are Apple-only.
    `Tests/ConduitTests/LinuxCompatibilityTests.swift` guards this.
@@ -266,13 +259,12 @@ cancellation via `cancel()`, and an opt-in `WarmupConfig` (`.default` or
 2. Mark the actor `public actor <Name>Provider: AIProvider, TextGenerator`
    (add other capability protocols as applicable).
 3. Add a `.trait(...)` in `Package.swift` and a matching
-   `.define("CONDUIT_TRAIT_<NAME>", .when(traits: ["<Name>"]))` in all three
-   affected targets (`ConduitAdvanced`, `Conduit`, `ConduitTests`, and
-   `ConduitMLXTests` if relevant).
+   `.define("CONDUIT_TRAIT_<NAME>", .when(traits: ["<Name>"]))` in the affected
+   targets (`Conduit`, `ConduitTests`, and `ConduitMLXTests` if relevant).
 4. Wrap all provider code in `#if CONDUIT_TRAIT_<NAME>` and, for native SDKs,
    also in `#if canImport(<SDK>)`.
-5. Add a facade factory in `ConduitAPI.swift` (and re-export in
-   `ConduitFacade.swift` if it needs to be visible from the minimal module).
+5. Add a convenience factory in `ConduitAPI.swift` when the provider should be
+   available through the facade-style API.
 6. Add unit tests in `Tests/ConduitTests/Providers/<Name>/` and update the
    Linux CI trait list in `.github/workflows/linux.yml` if the provider should
    be covered there.
@@ -281,7 +273,7 @@ cancellation via `cancel()`, and an opt-in `WarmupConfig` (`.default` or
 
 ## Common Tasks
 
-- **Update front-facing API** → edit `ConduitAPI.swift` + `ConduitFacade.swift`,
+- **Update front-facing API** → edit `ConduitAPI.swift`,
   then refresh `front-facing-api.md`, the `docs/guide/` pages, and the DocC
   catalog so examples still compile under `DocumentationExamplesTests`.
 - **Change provider defaults** → update the provider's `*Configuration.swift`

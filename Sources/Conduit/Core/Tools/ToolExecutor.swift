@@ -5,6 +5,76 @@
 
 import Foundation
 
+// MARK: - Tool Execution Delegate
+
+/// A delegate decision for an intercepted model-generated tool call.
+public enum ToolExecutionDecision: Sendable, Equatable {
+    /// Execute the registered Conduit tool normally.
+    case execute
+
+    /// Stop the tool-call loop without executing this call or continuing generation.
+    case stop
+
+    /// Use caller-provided output segments instead of executing the registered tool.
+    case provideOutput([Transcript.Segment])
+}
+
+/// Observes and controls Conduit tool execution without replacing the tool runtime.
+public protocol ToolExecutionDelegate: Sendable {
+    func toolExecutor(_ executor: ToolExecutor, didGenerate toolCalls: [Transcript.ToolCall]) async
+
+    func toolExecutor(
+        _ executor: ToolExecutor,
+        decisionFor toolCall: Transcript.ToolCall
+    ) async throws -> ToolExecutionDecision
+
+    func toolExecutor(
+        _ executor: ToolExecutor,
+        toolCall: Transcript.ToolCall,
+        didProduce output: Transcript.ToolOutput
+    ) async
+
+    func toolExecutor(
+        _ executor: ToolExecutor,
+        toolCall: Transcript.ToolCall,
+        didFail error: SendableError
+    ) async
+}
+
+extension ToolExecutionDelegate {
+    public func toolExecutor(_ executor: ToolExecutor, didGenerate toolCalls: [Transcript.ToolCall]) async {}
+
+    public func toolExecutor(
+        _ executor: ToolExecutor,
+        decisionFor toolCall: Transcript.ToolCall
+    ) async throws -> ToolExecutionDecision {
+        .execute
+    }
+
+    public func toolExecutor(
+        _ executor: ToolExecutor,
+        toolCall: Transcript.ToolCall,
+        didProduce output: Transcript.ToolOutput
+    ) async {}
+
+    public func toolExecutor(
+        _ executor: ToolExecutor,
+        toolCall: Transcript.ToolCall,
+        didFail error: SendableError
+    ) async {}
+}
+
+/// Result of delegate-aware tool execution.
+public struct ToolExecutionResult: Sendable, Equatable {
+    public let outputs: [Transcript.ToolOutput]
+    public let shouldContinue: Bool
+
+    public init(outputs: [Transcript.ToolOutput], shouldContinue: Bool) {
+        self.outputs = outputs
+        self.shouldContinue = shouldContinue
+    }
+}
+
 // MARK: - ToolExecutor
 
 /// An actor that manages tool registration and execution for LLM interactions.
@@ -322,5 +392,62 @@ public actor ToolExecutor {
 
             return results.sorted { $0.0 < $1.0 }.map { $0.1 }
         }
+    }
+
+    /// Executes multiple tool calls with delegate interception in generated-call order.
+    ///
+    /// This overload preserves deterministic delegate callback ordering. The existing
+    /// non-delegate batch API remains concurrent and unchanged.
+    public func execute(
+        toolCalls: [Transcript.ToolCall],
+        retryPolicy: RetryPolicy,
+        delegate: (any ToolExecutionDelegate)?
+    ) async throws -> ToolExecutionResult {
+        try Task.checkCancellation()
+        guard !toolCalls.isEmpty else {
+            return ToolExecutionResult(outputs: [], shouldContinue: true)
+        }
+
+        guard let delegate else {
+            let outputs = try await execute(toolCalls: toolCalls, retryPolicy: retryPolicy)
+            return ToolExecutionResult(outputs: outputs, shouldContinue: true)
+        }
+
+        await delegate.toolExecutor(self, didGenerate: toolCalls)
+
+        var outputs: [Transcript.ToolOutput] = []
+        outputs.reserveCapacity(toolCalls.count)
+
+        for toolCall in toolCalls {
+            try Task.checkCancellation()
+
+            let decision = try await delegate.toolExecutor(self, decisionFor: toolCall)
+
+            switch decision {
+            case .execute:
+                do {
+                    let output = try await execute(toolCall: toolCall, retryPolicy: retryPolicy)
+                    outputs.append(output)
+                    await delegate.toolExecutor(self, toolCall: toolCall, didProduce: output)
+                } catch {
+                    await delegate.toolExecutor(self, toolCall: toolCall, didFail: SendableError(error))
+                    throw error
+                }
+
+            case .provideOutput(let segments):
+                let output = Transcript.ToolOutput(
+                    id: toolCall.id,
+                    toolName: toolCall.toolName,
+                    segments: segments
+                )
+                outputs.append(output)
+                await delegate.toolExecutor(self, toolCall: toolCall, didProduce: output)
+
+            case .stop:
+                return ToolExecutionResult(outputs: outputs, shouldContinue: false)
+            }
+        }
+
+        return ToolExecutionResult(outputs: outputs, shouldContinue: true)
     }
 }

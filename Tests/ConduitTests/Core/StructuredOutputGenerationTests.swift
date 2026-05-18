@@ -1,13 +1,26 @@
 // StructuredOutputGenerationTests.swift
 // ConduitTests
 
+import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Generable
 private struct StreamingProfile {
     let name: String
     let age: Int
+}
+
+@Generable
+private struct NestedGeneratedItem {
+    let name: String
+    let count: Int
+}
+
+@Generable
+private struct NestedGeneratedInventory {
+    let title: String
+    let items: [NestedGeneratedItem]
 }
 
 @Suite("StructuredOutputGeneration")
@@ -194,5 +207,25 @@ struct StructuredOutputGenerationTests {
         #expect((try? first.rawContent.value(String.self, forProperty: "name")) == "Alice")
         #expect((try? first.rawContent.value(Int.self, forProperty: "age")) == nil)
         #expect((try? last.rawContent.value(Int.self, forProperty: "age")) == 30)
+    }
+
+    @Test("GeneratedContent supports JSON data round trips for nested generable arrays")
+    func generatedContentSupportsJSONDataRoundTripsForNestedGenerableArrays() throws {
+        let data = Data(#"{"title":"Inventory","items":[{"name":"Bolts","count":8},{"name":"Nuts","count":13}]}"#.utf8)
+        let content = try GeneratedContent(json: data)
+
+        let inventory = try NestedGeneratedInventory(content)
+        #expect(inventory.title == "Inventory")
+        #expect(inventory.items.map { $0.name } == ["Bolts", "Nuts"])
+        #expect(inventory.items.map { $0.count } == [8, 13])
+
+        let reparsed = try #require(
+            try JSONSerialization.jsonObject(with: content.jsonData) as? [String: Any]
+        )
+        #expect(reparsed["title"] as? String == "Inventory")
+        let items = try #require(reparsed["items"] as? [[String: Any]])
+        #expect(items.count == 2)
+        #expect(items[0]["name"] as? String == "Bolts")
+        #expect(items[1]["count"] as? Double == 13)
     }
 }

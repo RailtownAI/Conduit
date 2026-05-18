@@ -6,7 +6,7 @@
 // and can be conformed to by concrete types.
 
 import XCTest
-@testable import ConduitAdvanced
+@testable import Conduit
 
 // MARK: - Mock Types
 
@@ -601,7 +601,7 @@ final class ProtocolCompilationTests: XCTestCase {
 
     func testProviderTypeIsCaseIterable() {
         let allCases = ProviderType.allCases
-        XCTAssertEqual(allCases.count, 12)
+        XCTAssertEqual(allCases.count, 13)
         XCTAssertTrue(allCases.contains(.mlx))
         XCTAssertTrue(allCases.contains(.coreml))
         XCTAssertTrue(allCases.contains(.llama))
@@ -613,6 +613,7 @@ final class ProtocolCompilationTests: XCTestCase {
         XCTAssertTrue(allCases.contains(.anthropic))
         XCTAssertTrue(allCases.contains(.kimi))
         XCTAssertTrue(allCases.contains(.minimax))
+        XCTAssertTrue(allCases.contains(.gemini))
         XCTAssertTrue(allCases.contains(.azure))
     }
 
