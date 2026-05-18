@@ -525,7 +525,7 @@ struct AnthropicRequestBuildingTests {
     @Test("Audio-only multipart user message is rejected")
     func audioOnlyMessageRejected() async {
         let provider = AnthropicProvider(apiKey: "sk-ant-test")
-        let audio = Message.AudioContent(base64Data: "ZmFrZS1hdWRpbw==", mimeType: "audio/wav")
+        let audio = Message.AudioContent(base64Data: "ZmFrZS1hdWRpbw==", format: .wav)
         let messages = [
             Message(role: .user, content: .parts([.audio(audio)]))
         ]
@@ -545,6 +545,41 @@ struct AnthropicRequestBuildingTests {
             }
         } catch {
             Issue.record("Expected AIError.invalidInput, got \(error)")
+        }
+    }
+
+    @Test("Assistant tool-call message with unsupported audio content still serializes tool_use")
+    func assistantToolCallWithAudioOnlyContentSerializesToolUse() async throws {
+        let provider = AnthropicProvider(apiKey: "sk-ant-test")
+        let audio = Message.AudioContent(base64Data: "ZmFrZS1hdWRpbw==", format: .wav)
+        let toolCall = Transcript.ToolCall(
+            id: "toolu_audio",
+            toolName: "lookup",
+            arguments: GeneratedContent(properties: ["query": "weather"])
+        )
+        let messages = [
+            Message(
+                role: .assistant,
+                content: .parts([.audio(audio)]),
+                metadata: MessageMetadata(toolCalls: [toolCall])
+            )
+        ]
+
+        let request = try await provider.buildRequestBody(
+            messages: messages,
+            model: .claudeSonnet45,
+            config: .default
+        )
+
+        let assistantMessage = try #require(request.messages.first)
+        switch assistantMessage.content {
+        case .multipart(let parts):
+            #expect(parts.count == 1)
+            #expect(parts[0].type == "tool_use")
+            #expect(parts[0].id == "toolu_audio")
+            #expect(parts[0].name == "lookup")
+        case .text:
+            Issue.record("Expected multipart content with tool_use block")
         }
     }
 }
