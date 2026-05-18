@@ -172,10 +172,12 @@ struct AnthropicConfiguration: Sendable, Hashable, Codable {
         let scheme = url.scheme?.lowercased()
         let host = url.host?.lowercased() ?? ""
 
-        // Allow localhost for development
+        // Allow localhost for development, but only with HTTP.
         let isLocalhost = host == "localhost" || host == "127.0.0.1" || host == "::1"
+        let isHTTPS = scheme == "https"
+        let isLocalHTTP = isLocalhost && scheme == "http"
 
-        guard scheme == "https" || isLocalhost else {
+        guard isHTTPS || isLocalHTTP else {
             throw AIError.invalidInput(
                 "Base URL must use HTTPS for security. Got: \(url.absoluteString)"
             )

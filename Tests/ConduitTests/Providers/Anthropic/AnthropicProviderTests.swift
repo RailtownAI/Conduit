@@ -111,6 +111,15 @@ struct AnthropicConfigurationTests {
         #expect(ipv6.baseURL.host == "::1")
     }
 
+    @Test("Localhost non-HTTP schemes are rejected")
+    func localhostNonHTTPSchemeRejected() {
+        #expect(throws: AIError.self) {
+            _ = try AnthropicConfiguration(
+                baseURL: makeTestURL("ftp://localhost:8080")
+            )
+        }
+    }
+
     @Test("Fluent baseURL validates HTTPS")
     func fluentBaseURLValidatesHTTPS() throws {
         let config = AnthropicConfiguration.standard(apiKey: "sk-ant-test")
