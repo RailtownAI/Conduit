@@ -1,7 +1,7 @@
 #if CONDUIT_TRAIT_OLLAMA
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Suite("OllamaProvider")
 struct OllamaProviderTests {
@@ -13,7 +13,8 @@ struct OllamaProviderTests {
             keepAlive: "10m",
             raw: true,
             format: .json,
-            options: ["num_ctx": 4096]
+            options: ["num_ctx": 4096],
+            extraBody: ["think": .bool(true)]
         )
 
         let body = provider.buildGenerateBody(
@@ -32,6 +33,7 @@ struct OllamaProviderTests {
         #expect(body["keep_alive"] as? String == "10m")
         #expect(body["raw"] as? Bool == true)
         #expect(body["format"] as? String == "json")
+        #expect(body["think"] as? Bool == true)
         #expect((body["options"] as? [String: Any])?["num_predict"] as? Int == 64)
         #expect((body["options"] as? [String: Any])?["num_ctx"] as? Int == 4096)
     }

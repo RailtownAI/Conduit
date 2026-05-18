@@ -141,6 +141,38 @@ public struct WarmupConfig: Sendable {
     public static let eager = WarmupConfig(warmupOnInit: true)
 }
 
+// MARK: - ContextReducer
+
+/// A configurable reducer for trimming session history before provider calls.
+public struct ContextReducer: Sendable {
+    private let reduceMessages: @Sendable ([Message]) -> [Message]
+
+    public init(_ reduceMessages: @escaping @Sendable ([Message]) -> [Message]) {
+        self.reduceMessages = reduceMessages
+    }
+
+    public func reduce(_ messages: [Message]) -> [Message] {
+        reduceMessages(messages)
+    }
+
+    /// Keeps the most recent non-system messages and optionally preserves the leading system prompt.
+    public static func keepLastMessages(
+        _ count: Int,
+        preservingSystemPrompt: Bool = true
+    ) -> ContextReducer {
+        ContextReducer { messages in
+            let clampedCount = max(0, count)
+            guard preservingSystemPrompt, messages.first?.role == .system else {
+                return Array(messages.suffix(clampedCount))
+            }
+
+            let systemMessage = messages[0]
+            let nonSystemMessages = messages.dropFirst()
+            return [systemMessage] + nonSystemMessages.suffix(clampedCount)
+        }
+    }
+}
+
 // MARK: - ChatSession
 
 /// A stateful session manager for multi-turn chat conversations.
@@ -235,6 +267,16 @@ public struct WarmupConfig: Sendable {
 @Observable
 #endif
 public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked Sendable {
+    public enum StreamEvent: Sendable {
+        case text(String)
+        case chunk(GenerationChunk)
+        case reasoning([ReasoningDetail])
+        case partialToolCall(PartialToolCall)
+        case toolCalls([Transcript.ToolCall])
+        case toolOutput(Transcript.ToolOutput)
+        case transcriptDelta(Message)
+        case completed(String)
+    }
 
     // MARK: - Properties
 
@@ -259,6 +301,9 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
     ///
     /// Can be modified between calls to `send(_:)` or `stream(_:)`.
     public var config: GenerateConfig
+
+    /// Optional reducer that trims conversation history before provider calls.
+    public var contextReducer: ContextReducer?
 
     /// Optional tool executor used for tool-call continuation in `send(_:)`.
     ///
@@ -520,6 +565,9 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
             isGenerating = true
             cancellationRequested = false
             messages.append(userMessage)
+            if let contextReducer {
+                messages = contextReducer.reduce(messages)
+            }
             return (
                 messages,
                 config,
@@ -691,6 +739,17 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
         streamImpl(content, config: configOverride)
     }
 
+    public func streamEvents(_ content: String) -> AsyncThrowingStream<StreamEvent, Error> {
+        streamEventsImpl(content, config: nil)
+    }
+
+    public func streamEvents(
+        _ content: String,
+        config configOverride: GenerateConfig
+    ) -> AsyncThrowingStream<StreamEvent, Error> {
+        streamEventsImpl(content, config: configOverride)
+    }
+
     private func streamImpl(_ content: String, config configOverride: GenerateConfig?) -> AsyncThrowingStream<String, Error> {
         let userMessage = Message.user(content)
 
@@ -700,6 +759,9 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
             isGenerating = true
             cancellationRequested = false
             messages.append(userMessage)
+            if let contextReducer {
+                messages = contextReducer.reduce(messages)
+            }
             return messages
         }
 
@@ -778,6 +840,217 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
             }
 
             // Handle stream cancellation
+            continuation.onTermination = { @Sendable [weak self] termination in
+                if case .cancelled = termination {
+                    task.cancel()
+                }
+                guard let strongSelf = self else { return }
+                strongSelf.withLock {
+                    strongSelf.generationTask = nil
+                }
+            }
+        }
+    }
+
+    private func streamEventsImpl(
+        _ content: String,
+        config configOverride: GenerateConfig?
+    ) -> AsyncThrowingStream<StreamEvent, Error> {
+        let userMessage = Message.user(content)
+
+        let capturedState: (
+            messages: [Message],
+            config: GenerateConfig,
+            toolExecutor: ToolExecutor?,
+            toolExecutionDelegate: (any ToolExecutionDelegate)?,
+            toolCallRetryPolicy: ToolExecutor.RetryPolicy,
+            maxToolCallRounds: Int
+        ) = withLock {
+            lastError = nil
+            isGenerating = true
+            cancellationRequested = false
+            messages.append(userMessage)
+            if let contextReducer {
+                messages = contextReducer.reduce(messages)
+            }
+            return (
+                messages,
+                config,
+                toolExecutor,
+                toolExecutionDelegate,
+                toolCallRetryPolicy,
+                max(0, maxToolCallRounds)
+            )
+        }
+
+        let currentModel = model
+        let currentConfig = configOverride ?? capturedState.config
+
+        return AsyncThrowingStream { continuation in
+            let task = Task { [weak self] in
+                guard let self else {
+                    continuation.finish()
+                    return
+                }
+
+                var loopMessages = capturedState.messages
+                var turnMessages: [Message] = []
+                var toolRoundCount = 0
+                var finalResponseText = ""
+                var streamError: Error?
+
+                continuation.yield(.transcriptDelta(userMessage))
+
+                do {
+                    while true {
+                        try Task.checkCancellation()
+                        try self.throwIfCancelled()
+
+                        var assistantText = ""
+                        var tokenCount = 0
+                        var finishReason: FinishReason = .stop
+                        var usage: UsageStats?
+                        var completedToolCalls: [Transcript.ToolCall] = []
+                        var reasoningDetails: [ReasoningDetail] = []
+
+                        let providerStream = self.provider.streamWithMetadata(
+                            messages: loopMessages,
+                            model: currentModel,
+                            config: currentConfig
+                        )
+
+                        for try await chunk in providerStream {
+                            try Task.checkCancellation()
+                            try self.throwIfCancelled()
+
+                            continuation.yield(.chunk(chunk))
+
+                            if !chunk.text.isEmpty {
+                                assistantText += chunk.text
+                                continuation.yield(.text(chunk.text))
+                            }
+
+                            tokenCount += chunk.tokenCount
+                            if let chunkFinishReason = chunk.finishReason {
+                                finishReason = chunkFinishReason
+                            }
+                            if let chunkUsage = chunk.usage {
+                                usage = chunkUsage
+                            }
+                            if let details = chunk.reasoningDetails, !details.isEmpty {
+                                reasoningDetails.append(contentsOf: details)
+                                continuation.yield(.reasoning(details))
+                            }
+                            if let partialToolCall = chunk.partialToolCall {
+                                continuation.yield(.partialToolCall(partialToolCall))
+                            }
+                            if let toolCalls = chunk.completedToolCalls, !toolCalls.isEmpty {
+                                completedToolCalls.append(contentsOf: toolCalls)
+                            }
+                        }
+
+                        let assistantMessage = Message(
+                            role: .assistant,
+                            content: .text(assistantText),
+                            metadata: MessageMetadata(
+                                tokenCount: tokenCount,
+                                generationTime: 0,
+                                model: currentModel.rawValue,
+                                tokensPerSecond: 0,
+                                toolCalls: completedToolCalls.isEmpty ? nil : completedToolCalls
+                            )
+                        )
+
+                        _ = usage
+                        _ = reasoningDetails
+
+                        turnMessages.append(assistantMessage)
+                        loopMessages.append(assistantMessage)
+                        continuation.yield(.transcriptDelta(assistantMessage))
+
+                        guard !completedToolCalls.isEmpty else {
+                            finalResponseText = assistantText
+                            _ = finishReason
+                            break
+                        }
+
+                        continuation.yield(.toolCalls(completedToolCalls))
+
+                        guard toolRoundCount < capturedState.maxToolCallRounds else {
+                            throw AIError.invalidInput(
+                                "Tool-call loop exceeded maxToolCallRounds (\(capturedState.maxToolCallRounds))."
+                            )
+                        }
+
+                        guard let toolExecutor = capturedState.toolExecutor else {
+                            throw AIError.invalidInput(
+                                "Tool calls were requested but ChatSession.toolExecutor is nil."
+                            )
+                        }
+
+                        let toolOutputs: [Transcript.ToolOutput]
+                        if let delegate = capturedState.toolExecutionDelegate {
+                            let executionResult = try await toolExecutor.execute(
+                                toolCalls: completedToolCalls,
+                                retryPolicy: capturedState.toolCallRetryPolicy,
+                                delegate: delegate
+                            )
+                            guard executionResult.shouldContinue else {
+                                finalResponseText = assistantText
+                                break
+                            }
+                            toolOutputs = executionResult.outputs
+                        } else {
+                            toolOutputs = try await toolExecutor.execute(
+                                toolCalls: completedToolCalls,
+                                retryPolicy: capturedState.toolCallRetryPolicy
+                            )
+                        }
+
+                        try Task.checkCancellation()
+                        try self.throwIfCancelled()
+
+                        for output in toolOutputs {
+                            let toolMessage = Message.toolOutput(output)
+                            turnMessages.append(toolMessage)
+                            loopMessages.append(toolMessage)
+                            continuation.yield(.toolOutput(output))
+                            continuation.yield(.transcriptDelta(toolMessage))
+                        }
+
+                        toolRoundCount += 1
+                    }
+                } catch is CancellationError {
+                    streamError = AIError.cancelled
+                } catch {
+                    streamError = error
+                }
+
+                self.withLock {
+                    if let error = streamError {
+                        if let index = self.messages.lastIndex(where: { $0.id == userMessage.id }) {
+                            self.messages.remove(at: index)
+                        }
+                        self.lastError = error
+                    } else {
+                        self.messages.append(contentsOf: turnMessages)
+                        self.cancellationRequested = false
+                    }
+                    self.isGenerating = false
+                }
+
+                if let error = streamError {
+                    continuation.finish(throwing: error)
+                } else {
+                    continuation.yield(.completed(finalResponseText))
+                    continuation.finish()
+                }
+            }
+
+            self.withLock {
+                self.generationTask = task
+            }
+
             continuation.onTermination = { @Sendable [weak self] termination in
                 if case .cancelled = termination {
                     task.cancel()

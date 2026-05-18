@@ -2,7 +2,7 @@
 // Conduit
 
 import XCTest
-@testable import ConduitAdvanced
+@testable import Conduit
 
 /// Comprehensive tests for transcription types and functionality.
 ///

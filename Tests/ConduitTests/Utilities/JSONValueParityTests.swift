@@ -1,5 +1,5 @@
 import XCTest
-@testable import ConduitAdvanced
+@testable import Conduit
 
 final class JSONValueParityTests: XCTestCase {
 

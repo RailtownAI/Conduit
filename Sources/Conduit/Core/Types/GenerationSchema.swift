@@ -623,6 +623,77 @@ public struct GenerationSchema: Sendable, Codable, CustomDebugStringConvertible 
         }
         return nil
     }
+
+    func withInlinedReferences() -> GenerationSchema {
+        GenerationSchema(
+            root: inlineReferences(in: root, visiting: []),
+            defs: [:]
+        )
+    }
+
+    private func inlineReferences(in node: Node, visiting: Set<String>) -> Node {
+        switch node {
+        case .ref(let name):
+            guard !visiting.contains(name), let resolved = defs[name] else {
+                return node
+            }
+            var nextVisiting = visiting
+            nextVisiting.insert(name)
+            return inlineReferences(in: resolved, visiting: nextVisiting)
+
+        case .object(var object):
+            object.properties = object.properties.mapValues { property in
+                inlineReferences(in: property, visiting: visiting)
+            }
+            return .object(object)
+
+        case .array(var array):
+            array.items = inlineReferences(in: array.items, visiting: visiting)
+            return .array(array)
+
+        case .anyOf(let nodes):
+            return .anyOf(nodes.map { inlineReferences(in: $0, visiting: visiting) })
+
+        case .string, .number, .boolean:
+            return node
+        }
+    }
+}
+
+// MARK: - GenerationSchema.EncodingOptions
+
+extension GenerationSchema {
+    /// Options that control how a generation schema is converted into provider-facing JSON Schema.
+    public struct EncodingOptions: Sendable, Hashable {
+        /// Controls whether reusable schema definitions are preserved or expanded inline.
+        public enum ReferenceStrategy: Sendable, Hashable {
+            /// Preserve `$defs` and `$ref` entries.
+            case preserve
+
+            /// Expand referenced definitions inline and omit `$defs`.
+            case inline
+        }
+
+        /// The reference encoding strategy.
+        public var referenceStrategy: ReferenceStrategy
+
+        /// Whether object schemas should omit `additionalProperties`.
+        public var omitAdditionalProperties: Bool
+
+        public init(
+            referenceStrategy: ReferenceStrategy = .preserve,
+            omitAdditionalProperties: Bool = false
+        ) {
+            self.referenceStrategy = referenceStrategy
+            self.omitAdditionalProperties = omitAdditionalProperties
+        }
+
+        /// The default JSON Schema shape: preserve references and include `additionalProperties`.
+        public static let `default` = EncodingOptions()
+
+        /// Provider-friendly JSON Schema that expands `$ref` entries inline.
+        public static let inlineReferences = EncodingOptions(referenceStrategy: .inline)
+    }
 }
 
 // MARK: - GenerationSchema.Property

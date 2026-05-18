@@ -195,6 +195,15 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
         self.init(kind: .string(completedJSON))
     }
 
+    /// Creates equivalent content from UTF-8 JSON data.
+    ///
+    /// Unlike ``init(json: String)``, this initializer is intended for complete JSON payloads from files,
+    /// network responses, or provider callbacks that already expose bytes.
+    public init(json data: Data) throws {
+        let parsed = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        self = try Self.fromJSONValue(parsed)
+    }
+
     internal static func fromJSONValue(_ value: Any) throws -> GeneratedContent {
         if let dict = value as? [String: Any] {
             var properties: [String: GeneratedContent] = [:]
@@ -242,6 +251,16 @@ public struct GeneratedContent: Sendable, Equatable, Generable, CustomDebugStrin
             return String(data: data, encoding: .utf8) ?? "{}"
         } catch {
             return "{}"
+        }
+    }
+
+    /// Returns a UTF-8 JSON representation of the generated content.
+    public var jsonData: Data {
+        do {
+            let jsonValue = try toJSONValue()
+            return try JSONSerialization.data(withJSONObject: jsonValue, options: [.fragmentsAllowed])
+        } catch {
+            return Data("{}".utf8)
         }
     }
 

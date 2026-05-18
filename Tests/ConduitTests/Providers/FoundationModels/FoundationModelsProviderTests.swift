@@ -3,7 +3,7 @@
 
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 #if canImport(FoundationModels)
 import FoundationModels

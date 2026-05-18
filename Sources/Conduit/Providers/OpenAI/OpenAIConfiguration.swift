@@ -326,6 +326,20 @@ public struct OpenAIConfiguration: Sendable, Hashable {
         )
     }
 
+    /// Creates a configuration for LM Studio's local OpenAI-compatible server.
+    ///
+    /// LM Studio defaults to `http://localhost:1234/v1` and accepts any non-empty
+    /// bearer token for OpenAI SDK compatibility.
+    static func lmStudio(
+        baseURL: URL = URL(string: "http://localhost:1234/v1")!,
+        apiKey: String = "lm-studio"
+    ) -> OpenAIConfiguration {
+        OpenAIConfiguration(
+            endpoint: .custom(baseURL),
+            authentication: .bearer(apiKey)
+        )
+    }
+
     // MARK: - Computed Properties
 
     /// Whether authentication is properly configured.

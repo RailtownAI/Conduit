@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 private enum CustomOptionsProviderA {}
 private enum CustomOptionsProviderB {}

@@ -10,6 +10,15 @@ import Foundation
 /// Concise alias for generation options.
 public typealias RunOptions = GenerateConfig
 
+/// Compatibility aliases for macro-generated `Conduit.*` references when the
+/// facade type name shadows the module name inside consumer targets.
+public typealias ConduitGenerable = Generable
+public typealias ConduitGeneratedContent = GeneratedContent
+public typealias ConduitGenerationSchema = GenerationSchema
+public typealias ConduitGenerationID = GenerationID
+public typealias ConduitConvertibleFromGeneratedContent = ConvertibleFromGeneratedContent
+public typealias ConduitConvertibleToGeneratedContent = ConvertibleToGeneratedContent
+
 /// Unified model descriptor used by the facade API.
 public struct Model: Sendable, Hashable, Codable, ExpressibleByStringLiteral {
     public enum Family: String, Sendable, Hashable, Codable, CaseIterable {
@@ -432,6 +441,27 @@ extension Provider {
             .openAI(model.id)
         }
     }
+
+    public static func lmStudio(
+        apiKey: String = "lm-studio",
+        baseURL: URL = URL(string: "http://localhost:1234/v1")!,
+        configure: (inout OpenAIOptions) -> Void = { _ in }
+    ) -> Self {
+        var options = OpenAIOptions()
+        configure(&options)
+
+        var configuration = OpenAIConfiguration.lmStudio(baseURL: baseURL, apiKey: apiKey)
+        configuration.timeout = max(0, options.timeout)
+        configuration.maxRetries = max(0, options.maxRetries)
+        configuration.defaultHeaders = options.headers
+        configuration.organizationID = options.organizationID
+        configuration.apiVariant = options.api == .responses ? .responses : .chatCompletions
+        let provider = OpenAIProvider(configuration: configuration)
+
+        return .custom(provider) { model in
+            .openAI(model.id)
+        }
+    }
     #endif
 
     #if CONDUIT_TRAIT_ANTHROPIC
@@ -512,14 +542,12 @@ extension Provider {
 
 /// Top-level concise entry point.
 public struct Conduit: Sendable {
-    // Compatibility aliases for macro-generated `Conduit.*` references when the facade
-    // type name shadows the module name inside consumer targets.
-    public typealias Generable = ConduitAdvanced.Generable
-    public typealias GeneratedContent = ConduitAdvanced.GeneratedContent
-    public typealias GenerationSchema = ConduitAdvanced.GenerationSchema
-    public typealias GenerationID = ConduitAdvanced.GenerationID
-    public typealias ConvertibleFromGeneratedContent = ConduitAdvanced.ConvertibleFromGeneratedContent
-    public typealias ConvertibleToGeneratedContent = ConduitAdvanced.ConvertibleToGeneratedContent
+    public typealias Generable = ConduitGenerable
+    public typealias GeneratedContent = ConduitGeneratedContent
+    public typealias GenerationSchema = ConduitGenerationSchema
+    public typealias GenerationID = ConduitGenerationID
+    public typealias ConvertibleFromGeneratedContent = ConduitConvertibleFromGeneratedContent
+    public typealias ConvertibleToGeneratedContent = ConduitConvertibleToGeneratedContent
 
     public let provider: Provider
 
@@ -542,12 +570,24 @@ public struct Conduit: Sendable {
 
 /// Minimal, stateful conversational interface.
 public struct Session: Sendable {
+    public enum StreamEvent: Sendable {
+        case text(String)
+        case chunk(GenerationChunk)
+        case reasoning([ReasoningDetail])
+        case partialToolCall(PartialToolCall)
+        case toolCalls([Transcript.ToolCall])
+        case toolOutput(Transcript.ToolOutput)
+        case transcriptDelta(Message)
+        case completed(String)
+    }
+
     public struct Options: Sendable {
         public var run: RunOptions
         fileprivate var tools: [any Tool]
         fileprivate var toolExecutionDelegate: (any ToolExecutionDelegate)?
         fileprivate var toolRetryPolicy: ToolExecutor.RetryPolicy
         fileprivate var maxToolRounds: Int
+        fileprivate var contextReducer: ContextReducer?
 
         public init(run: RunOptions = .default) {
             self.run = run
@@ -555,6 +595,7 @@ public struct Session: Sendable {
             self.toolExecutionDelegate = nil
             self.toolRetryPolicy = .none
             self.maxToolRounds = 8
+            self.contextReducer = nil
         }
 
         /// Mutate run options using a closure for concise composition.
@@ -578,6 +619,10 @@ public struct Session: Sendable {
         public mutating func maxToolRounds(_ value: Int) {
             self.maxToolRounds = max(0, value)
         }
+
+        public mutating func contextReducer(_ reducer: ContextReducer?) {
+            self.contextReducer = reducer
+        }
     }
 
     /// Typed output wrapper for `run(_:as:)`.
@@ -590,6 +635,8 @@ public struct Session: Sendable {
     private let runTextWithConfig: @Sendable (String, GenerateConfig) async throws -> String
     private let streamText: @Sendable (String) -> AsyncThrowingStream<String, Error>
     private let streamTextWithConfig: @Sendable (String, GenerateConfig) -> AsyncThrowingStream<String, Error>
+    private let streamEventsText: @Sendable (String) -> AsyncThrowingStream<StreamEvent, Error>
+    private let streamEventsTextWithConfig: @Sendable (String, GenerateConfig) -> AsyncThrowingStream<StreamEvent, Error>
     private let messagesSnapshot: @Sendable () -> [Message]
     private let setSystemPrompt: @Sendable (String) -> Void
     private let cancelGeneration: @Sendable () async -> Void
@@ -601,6 +648,8 @@ public struct Session: Sendable {
         runTextWithConfig: @escaping @Sendable (String, GenerateConfig) async throws -> String,
         streamText: @escaping @Sendable (String) -> AsyncThrowingStream<String, Error>,
         streamTextWithConfig: @escaping @Sendable (String, GenerateConfig) -> AsyncThrowingStream<String, Error>,
+        streamEventsText: @escaping @Sendable (String) -> AsyncThrowingStream<StreamEvent, Error>,
+        streamEventsTextWithConfig: @escaping @Sendable (String, GenerateConfig) -> AsyncThrowingStream<StreamEvent, Error>,
         messagesSnapshot: @escaping @Sendable () -> [Message],
         setSystemPrompt: @escaping @Sendable (String) -> Void,
         cancelGeneration: @escaping @Sendable () async -> Void,
@@ -611,6 +660,8 @@ public struct Session: Sendable {
         self.runTextWithConfig = runTextWithConfig
         self.streamText = streamText
         self.streamTextWithConfig = streamTextWithConfig
+        self.streamEventsText = streamEventsText
+        self.streamEventsTextWithConfig = streamEventsTextWithConfig
         self.messagesSnapshot = messagesSnapshot
         self.setSystemPrompt = setSystemPrompt
         self.cancelGeneration = cancelGeneration
@@ -658,6 +709,16 @@ public struct Session: Sendable {
         streamTextWithConfig(prompt, config)
     }
 
+    @inline(__always)
+    public func streamEvents(_ prompt: String) -> AsyncThrowingStream<StreamEvent, Error> {
+        streamEventsText(prompt)
+    }
+
+    @inline(__always)
+    public func streamEvents(_ prompt: String, config: GenerateConfig) -> AsyncThrowingStream<StreamEvent, Error> {
+        streamEventsTextWithConfig(prompt, config)
+    }
+
     fileprivate var messages: [Message] {
         messagesSnapshot()
     }
@@ -698,6 +759,7 @@ extension Session {
         release: (@Sendable () async -> Void)? = nil
     ) -> Session {
         let session = ChatSession(provider: provider, model: model, config: options.run)
+        session.contextReducer = options.contextReducer
 
         if !options.tools.isEmpty {
             session.toolExecutor = ToolExecutor(tools: options.tools)
@@ -719,6 +781,12 @@ extension Session {
             streamTextWithConfig: { prompt, config in
                 session.stream(prompt, config: config)
             },
+            streamEventsText: { prompt in
+                mapStreamEvents(session.streamEvents(prompt))
+            },
+            streamEventsTextWithConfig: { prompt, config in
+                mapStreamEvents(session.streamEvents(prompt, config: config))
+            },
             messagesSnapshot: {
                 session.messages
             },
@@ -731,6 +799,46 @@ extension Session {
             prepareHook: prepare,
             releaseHook: release
         )
+    }
+
+    private static func mapStreamEvents<P: AIProvider & TextGenerator>(
+        _ stream: AsyncThrowingStream<ChatSession<P>.StreamEvent, Error>
+    ) -> AsyncThrowingStream<Session.StreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    for try await event in stream {
+                        continuation.yield(mapStreamEvent(event))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func mapStreamEvent<P: AIProvider & TextGenerator>(
+        _ event: ChatSession<P>.StreamEvent
+    ) -> Session.StreamEvent {
+        switch event {
+        case .text(let text):
+            return .text(text)
+        case .chunk(let chunk):
+            return .chunk(chunk)
+        case .reasoning(let details):
+            return .reasoning(details)
+        case .partialToolCall(let partial):
+            return .partialToolCall(partial)
+        case .toolCalls(let calls):
+            return .toolCalls(calls)
+        case .toolOutput(let output):
+            return .toolOutput(output)
+        case .transcriptDelta(let message):
+            return .transcriptDelta(message)
+        case .completed(let text):
+            return .completed(text)
+        }
     }
 }
 

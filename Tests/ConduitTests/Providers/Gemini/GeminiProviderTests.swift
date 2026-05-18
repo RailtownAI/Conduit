@@ -1,7 +1,7 @@
 #if CONDUIT_TRAIT_GEMINI
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Generable
 private struct GeminiTestProfile {

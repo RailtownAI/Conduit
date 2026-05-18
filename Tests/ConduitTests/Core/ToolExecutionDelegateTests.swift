@@ -1,5 +1,5 @@
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 private actor RecordingToolDelegate: ToolExecutionDelegate {
     enum Event: Equatable {

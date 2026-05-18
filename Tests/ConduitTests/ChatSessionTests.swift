@@ -2,7 +2,7 @@
 // ConduitTests
 
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 // MARK: - Mock Provider
 
@@ -32,8 +32,14 @@ actor MockTextProvider: AIProvider, @preconcurrency TextGenerator {
     /// Queue of generation results to return in order.
     private var _queuedGenerationResults: [GenerationResult] = []
 
+    /// Queue of stream chunks to return in order, grouped by stream call.
+    private var _queuedStreamChunks: [[GenerationChunk]] = []
+
     /// All message arrays received by each generate call.
     private var _receivedMessagesByGenerateCall: [[Message]] = []
+
+    /// All message arrays received by each stream call.
+    private var _receivedMessagesByStreamCall: [[Message]] = []
 
     /// Optional artificial delay per generate call for cancellation tests.
     private var _generationDelayNanos: UInt64 = 0
@@ -65,8 +71,17 @@ actor MockTextProvider: AIProvider, @preconcurrency TextGenerator {
         set { _receivedMessagesByGenerateCall = newValue }
     }
 
+    var receivedMessagesByStreamCall: [[Message]] {
+        get { _receivedMessagesByStreamCall }
+        set { _receivedMessagesByStreamCall = newValue }
+    }
+
     func setQueuedGenerationResults(_ results: [GenerationResult]) {
         _queuedGenerationResults = results
+    }
+
+    func setQueuedStreamChunks(_ chunks: [[GenerationChunk]]) {
+        _queuedStreamChunks = chunks
     }
 
     func setGenerationDelay(nanoseconds: UInt64) {
@@ -117,12 +132,24 @@ actor MockTextProvider: AIProvider, @preconcurrency TextGenerator {
         config: GenerateConfig
     ) -> AsyncThrowingStream<StreamChunk, Error> {
         _lastReceivedMessages = messages
+        _receivedMessagesByStreamCall.append(messages)
         let responseText = _responseToReturn
         let throwError = _shouldThrowError
+        let queuedChunks = _queuedStreamChunks.isEmpty ? nil : _queuedStreamChunks.removeFirst()
 
         return AsyncThrowingStream { continuation in
             if throwError {
                 continuation.finish(throwing: MockError.simulatedFailure)
+                return
+            }
+
+            if let queuedChunks {
+                Task {
+                    for chunk in queuedChunks {
+                        continuation.yield(chunk)
+                    }
+                    continuation.finish()
+                }
                 return
             }
 
@@ -208,7 +235,9 @@ actor MockTextProvider: AIProvider, @preconcurrency TextGenerator {
         _generateCallCount = 0
         _generationDelayNanos = 0
         _queuedGenerationResults = []
+        _queuedStreamChunks = []
         _receivedMessagesByGenerateCall = []
+        _receivedMessagesByStreamCall = []
     }
 }
 
@@ -570,6 +599,76 @@ struct ChatSessionTests {
         )
     }
 
+    @Test("streamEvents executes tool calls and emits transcript deltas")
+    func streamEventsExecutesToolCallsAndEmitsTranscriptDeltas() async throws {
+        let provider = MockTextProvider()
+        let session = try await ChatSession(provider: provider, model: .llama3_2_1b)
+
+        let toolCall = try Transcript.ToolCall(
+            id: "stream_tool_call_1",
+            toolName: "session_echo_tool",
+            argumentsJSON: #"{"input":"Paris"}"#
+        )
+
+        await provider.setQueuedStreamChunks([
+            [
+                GenerationChunk(
+                    text: "Calling tool",
+                    tokenCount: 2,
+                    isComplete: true,
+                    finishReason: .toolCalls,
+                    completedToolCalls: [toolCall]
+                )
+            ],
+            [
+                GenerationChunk(
+                    text: "Weather is Echo: Paris",
+                    tokenCount: 4,
+                    isComplete: true,
+                    finishReason: .stop
+                )
+            ]
+        ])
+
+        session.toolExecutor = ToolExecutor(tools: [SessionEchoTool()])
+
+        var textEvents: [String] = []
+        var emittedToolCalls: [[Transcript.ToolCall]] = []
+        var emittedToolOutputs: [Transcript.ToolOutput] = []
+        var transcriptDeltas: [Message] = []
+
+        for try await event in session.streamEvents("What's the weather?") {
+            switch event {
+            case .text(let text):
+                textEvents.append(text)
+            case .toolCalls(let calls):
+                emittedToolCalls.append(calls)
+            case .toolOutput(let output):
+                emittedToolOutputs.append(output)
+            case .transcriptDelta(let message):
+                transcriptDeltas.append(message)
+            default:
+                break
+            }
+        }
+
+        #expect(textEvents == ["Calling tool", "Weather is Echo: Paris"])
+        #expect(emittedToolCalls.count == 1)
+        #expect(emittedToolCalls.first?.first?.toolName == "session_echo_tool")
+        #expect(emittedToolOutputs.map { $0.segments.map(\.description).joined() } == ["Echo: Paris"])
+        #expect(transcriptDeltas.map(\.role) == [.user, .assistant, .tool, .assistant])
+
+        #expect(session.messages.count == 4)
+        #expect(session.messages[1].metadata?.toolCalls?.count == 1)
+        #expect(session.messages[2].role == .tool)
+        #expect(session.messages[2].content.textValue == "Echo: Paris")
+        #expect(session.messages[3].content.textValue == "Weather is Echo: Paris")
+
+        let receivedByStreamCall = await provider.receivedMessagesByStreamCall
+        #expect(receivedByStreamCall.count == 2)
+        #expect(receivedByStreamCall[1].contains(where: { $0.role == .tool && $0.content.textValue == "Echo: Paris" }))
+    }
+
     @Test("send rolls back when tool execution fails")
     func sendRollsBackWhenToolExecutionFails() async throws {
         let provider = MockTextProvider()
@@ -884,6 +983,33 @@ struct ChatSessionTests {
 
         #expect(session.messages.count == 3)
         #expect(session.messages[0].content.textValue == "Current system")
+    }
+
+    @Test("Context reducer trims history before provider calls")
+    func contextReducerTrimsHistoryBeforeProviderCalls() async throws {
+        let provider = MockTextProvider()
+        let session = try await ChatSession(provider: provider, model: .llama3_2_1b)
+
+        session.setSystemPrompt("Stay concise.")
+        session.injectHistory([
+            .user("Old question 1"),
+            .assistant("Old answer 1"),
+            .user("Old question 2"),
+            .assistant("Old answer 2")
+        ])
+        session.contextReducer = .keepLastMessages(3)
+
+        _ = try await session.send("Fresh question")
+
+        let received = await provider.receivedMessagesByGenerateCall.first ?? []
+        #expect(received.map(\.role) == [.system, .user, .assistant, .user])
+        #expect(received.map { $0.content.textValue } == [
+            "Stay concise.",
+            "Old question 2",
+            "Old answer 2",
+            "Fresh question"
+        ])
+        #expect(session.messages.map(\.role) == [.system, .user, .assistant, .user, .assistant])
     }
 
     // MARK: - Computed Properties Tests

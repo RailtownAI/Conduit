@@ -6,7 +6,7 @@
 // and can be conformed to by concrete types.
 
 import XCTest
-@testable import ConduitAdvanced
+@testable import Conduit
 
 // MARK: - Mock Types
 

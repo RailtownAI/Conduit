@@ -6,7 +6,7 @@
 #if CONDUIT_TRAIT_ANTHROPIC
 import Testing
 import Foundation
-@testable import ConduitAdvanced
+@testable import Conduit
 
 // MARK: - Test Helpers
 

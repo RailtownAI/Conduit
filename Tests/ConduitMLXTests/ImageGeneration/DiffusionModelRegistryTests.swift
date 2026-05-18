@@ -7,7 +7,7 @@
 
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Suite("DiffusionModelRegistry Tests", .serialized)
 struct DiffusionModelRegistryTests {

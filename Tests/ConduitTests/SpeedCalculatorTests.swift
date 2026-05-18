@@ -3,7 +3,7 @@
 
 import Testing
 import Foundation
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Suite("SpeedCalculator Tests")
 struct SpeedCalculatorTests {

@@ -2,7 +2,7 @@
 // Conduit Tests
 
 import XCTest
-@testable import ConduitAdvanced
+@testable import Conduit
 
 /// Comprehensive test suite for ImageGenerationConfig.
 ///

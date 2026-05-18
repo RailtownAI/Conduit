@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 #if CONDUIT_TRAIT_COREML && canImport(CoreML) && canImport(Tokenizers) && canImport(Generation) && canImport(Models)
 @Generable

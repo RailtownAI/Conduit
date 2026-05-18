@@ -3,7 +3,7 @@
 
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Suite("V2 Runtime Benchmark Harness")
 struct V2RuntimeBenchmarkHarnessTests {

@@ -2,7 +2,7 @@
 // ConduitTests
 
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Suite("HFMetadataService Tests")
 struct HFMetadataServiceTests {

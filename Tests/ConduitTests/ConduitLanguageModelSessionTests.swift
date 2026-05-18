@@ -1,5 +1,5 @@
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 @Generable
 private struct CompatibilityProfile: Equatable {
@@ -91,6 +91,18 @@ private actor CompatibilityProvider: AIProvider, @preconcurrency TextGenerator {
 
     private func currentStreamedChunks() -> [String] {
         streamedChunks
+    }
+}
+
+private actor ResourceReleaseRecorder {
+    private var releaseCount = 0
+
+    func recordRelease() {
+        releaseCount += 1
+    }
+
+    func count() -> Int {
+        releaseCount
     }
 }
 
@@ -209,5 +221,42 @@ struct ConduitLanguageModelSessionTests {
         #expect(last?.content.name == "Ava")
         #expect(last?.content.age == 31)
         #expect(session.transcript.count == 2)
+    }
+
+    @Test("canonical Session exposes streaming events")
+    func canonicalSessionExposesStreamingEvents() async throws {
+        let provider = CompatibilityProvider(
+            results: [],
+            streamedChunks: ["Hello ", "events"]
+        )
+        let app = Conduit(.custom(provider, mapModel: { _ in .openAI("test-model") }))
+        let session = try app.session(model: .openAI("test-model"))
+
+        var text = ""
+        for try await event in session.streamEvents("Say hello") {
+            if case .text(let fragment) = event {
+                text += fragment
+            }
+        }
+
+        #expect(text == "Hello events")
+    }
+
+    @Test("canonical Session releases provider resources")
+    func canonicalSessionReleasesProviderResources() async throws {
+        let provider = CompatibilityProvider(results: [])
+        let recorder = ResourceReleaseRecorder()
+        let app = Conduit(.custom(
+            provider,
+            mapModel: { _ in .openAI("test-model") },
+            release: {
+                await recorder.recordRelease()
+            }
+        ))
+        let session = try app.session(model: .openAI("test-model"))
+
+        await session.releaseResources()
+
+        #expect(await recorder.count() == 1)
     }
 }

@@ -1,7 +1,7 @@
 #if CONDUIT_TRAIT_OPENAI
 import Foundation
 import Testing
-@testable import ConduitAdvanced
+@testable import Conduit
 
 private struct OpenAIOnlyOptions: Codable, Sendable, Equatable {
     var mode: String

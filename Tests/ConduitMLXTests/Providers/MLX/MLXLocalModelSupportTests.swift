@@ -3,7 +3,7 @@
 
 import Testing
 import Conduit
-@testable import ConduitAdvanced
+@testable import Conduit
 
 #if CONDUIT_TRAIT_MLX && canImport(MLX)
 @Suite("MLX Local Model Support")
@@ -25,11 +25,5 @@ struct MLXLocalModelSupportTests {
         _ = try app.session(model: Model.mlxLocal("/tmp/conduit-local-mlx-model"))
     }
 
-    @Test("ConduitAdvanced accepts local MLX models in sessions")
-    func advancedConduitAcceptsLocalMLXModels() throws {
-        let app = ConduitAdvanced.Conduit(ConduitAdvanced.Provider.mlx())
-
-        _ = try app.session(model: ConduitAdvanced.Model.mlxLocal("/tmp/conduit-local-mlx-model"))
-    }
 }
 #endif
