@@ -3,6 +3,11 @@ import Foundation
 import Testing
 @testable import Conduit
 
+@Generable
+private struct OllamaToolArgs {
+    let city: String
+}
+
 @Suite("OllamaProvider")
 struct OllamaProviderTests {
     @Test("native generate body includes prompt, stream flag, images, and typed options")
@@ -69,6 +74,31 @@ struct OllamaProviderTests {
         #expect((body["options"] as? [String: Any])?["num_gpu"] as? Int == 0)
     }
 
+    @Test("chat body includes configured tool definitions")
+    func nativeChatBodyIncludesTools() throws {
+        let provider = OllamaProvider(configuration: .init(baseURL: URL(string: "http://localhost:11434/api")!))
+        let tool = Transcript.ToolDefinition(
+            name: "weather",
+            description: "Get weather",
+            parameters: OllamaToolArgs.generationSchema
+        )
+
+        let body = provider.buildChatBody(
+            messages: [.user("Weather?")],
+            model: .openAI("llama3.2"),
+            config: .default.tools([tool]),
+            stream: false
+        )
+
+        let tools = try #require(body["tools"] as? [[String: Any]])
+        let first = try #require(tools.first)
+        let function = try #require(first["function"] as? [String: Any])
+        #expect(first["type"] as? String == "function")
+        #expect(function["name"] as? String == "weather")
+        #expect(function["description"] as? String == "Get weather")
+        #expect(function["parameters"] != nil)
+    }
+
     @Test("native model list and show responses parse diagnostics")
     func modelMetadataParsing() throws {
         let provider = OllamaProvider(configuration: .init(baseURL: URL(string: "http://localhost:11434/api")!))
@@ -131,6 +161,19 @@ struct OllamaProviderTests {
         #expect(chunk.text == "hel")
         #expect(chunk.isComplete == false)
         #expect(chunk.finishReason == nil)
+    }
+
+    @Test("final streaming chat chunks preserve done reason")
+    func finalStreamingChatChunkPreservesDoneReason() throws {
+        let provider = OllamaProvider(configuration: .init(baseURL: URL(string: "http://localhost:11434/api")!))
+
+        let chunk = try provider.parseChatStreamChunk(Data("""
+        {"message":{"content":""},"done":true,"done_reason":"length","eval_count":16,"prompt_eval_count":4}
+        """.utf8))
+
+        #expect(chunk.isComplete == true)
+        #expect(chunk.finishReason == .maxTokens)
+        #expect(chunk.usage?.completionTokens == 16)
     }
 
     @Test("requests carry configured timeout for streaming and pull paths")

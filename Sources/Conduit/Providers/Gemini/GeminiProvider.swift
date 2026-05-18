@@ -153,12 +153,12 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         var parser = ServerSentEventParser()
         for try await line in bytes.lines {
             for event in parser.ingestLine(line) {
-                guard let chunk = decodeStreamEvent(event.data) else { continue }
+                guard let chunk = try decodeStreamEvent(event.data) else { continue }
                 continuation.yield(chunk)
             }
         }
         for event in parser.finish() {
-            guard let chunk = decodeStreamEvent(event.data) else { continue }
+            guard let chunk = try decodeStreamEvent(event.data) else { continue }
             continuation.yield(chunk)
         }
         continuation.finish()
@@ -277,7 +277,7 @@ public actor GeminiProvider: AIProvider, TextGenerator {
             }
         }
 
-        let finishReason = toolCalls.isEmpty ? FinishReason.stop : .toolCalls
+        let finishReason = toolCalls.isEmpty ? mapFinishReason(first["finishReason"] as? String) : .toolCalls
         return GenerationResult(
             text: toolCalls.isEmpty ? text : "",
             tokenCount: 0,
@@ -288,11 +288,11 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         )
     }
 
-    public nonisolated func decodeStreamEvent(_ data: String) -> GenerationChunk? {
-        guard let payload = data.data(using: .utf8),
-              let result = try? parseGenerationResponse(data: payload) else {
+    public nonisolated func decodeStreamEvent(_ data: String) throws -> GenerationChunk? {
+        guard let payload = data.data(using: .utf8), !payload.isEmpty else {
             return nil
         }
+        let result = try parseGenerationResponse(data: payload)
         return GenerationChunk(
             text: result.text,
             tokenCount: result.tokenCount,
@@ -348,6 +348,21 @@ public actor GeminiProvider: AIProvider, TextGenerator {
             parts.append(contentsOf: toolCalls.map(serializeFunctionCall))
         }
         return parts
+    }
+
+    private nonisolated func mapFinishReason(_ reason: String?) -> FinishReason {
+        switch reason?.uppercased() {
+        case nil, "", "STOP":
+            return .stop
+        case "MAX_TOKENS":
+            return .maxTokens
+        case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
+            return .contentFilter
+        case "MALFORMED_FUNCTION_CALL":
+            return .toolCalls
+        default:
+            return .stop
+        }
     }
 
     private nonisolated func serializeParts(_ content: Message.Content) -> [[String: Any]] {

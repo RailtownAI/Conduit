@@ -896,6 +896,7 @@ public final class ConduitLanguageModelSession: @unchecked Sendable {
     }
 
     private let session: Session
+    private let baseGenerateConfig: GenerateConfig
     private let lock = NSLock()
     private var storedTranscript: Transcript
     private var syncedMessageCount: Int
@@ -912,8 +913,10 @@ public final class ConduitLanguageModelSession: @unchecked Sendable {
         var options = Session.Options()
         if !tools.isEmpty {
             options.tools { tools }
+            options.run = options.run.tools(tools)
         }
         self.session = try model.provider.makeSession(model.model, options)
+        self.baseGenerateConfig = options.run
         self.storedTranscript = Transcript()
         self.syncedMessageCount = self.session.messages.count
 
@@ -941,7 +944,7 @@ public final class ConduitLanguageModelSession: @unchecked Sendable {
         let promptEntry = makePromptEntry(prompt, options: options, responseFormat: nil)
         append(.prompt(promptEntry))
 
-        let text = try await session.run(promptEntry.textContent, config: promptEntry.generateConfig)
+        let text = try await session.run(promptEntry.textContent, config: promptEntry.generateConfig(base: baseGenerateConfig))
         let content = text.generatedContent
         appendToolEntriesFromSessionMessages()
         append(.response(Transcript.Response(
@@ -961,7 +964,7 @@ public final class ConduitLanguageModelSession: @unchecked Sendable {
         let promptEntry = makePromptEntry(prompt, options: options, responseFormat: responseFormat)
         append(.prompt(promptEntry))
 
-        let text = try await session.run(promptEntry.textContent, config: promptEntry.generateConfig)
+        let text = try await session.run(promptEntry.textContent, config: promptEntry.generateConfig(base: baseGenerateConfig))
         let rawContent = try Self.decodeGeneratedContent(text, as: type)
         let value = try Self.decodeGeneratedValue(rawContent, as: type)
 
@@ -995,7 +998,7 @@ public final class ConduitLanguageModelSession: @unchecked Sendable {
                 var buffer = ""
 
                 do {
-                    for try await chunk in session.stream(promptEntry.textContent, config: promptEntry.generateConfig) {
+                    for try await chunk in session.stream(promptEntry.textContent, config: promptEntry.generateConfig(base: baseGenerateConfig)) {
                         buffer += chunk
 
                         guard let rawContent = try Self.partialGeneratedContent(from: buffer, type: type) else {

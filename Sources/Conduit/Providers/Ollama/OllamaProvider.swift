@@ -340,6 +340,9 @@ public actor OllamaProvider: AIProvider, TextGenerator {
             },
             "stream": stream
         ]
+        if !config.tools.isEmpty && config.toolChoice != .none {
+            body["tools"] = config.tools.map(serializeToolDefinition)
+        }
         applyOptions(from: config, to: &body)
         return body
     }
@@ -369,7 +372,7 @@ public actor OllamaProvider: AIProvider, TextGenerator {
             text: text,
             tokenCount: completionTokens,
             isComplete: isDone,
-            finishReason: isDone ? .stop : nil,
+            finishReason: isDone ? mapDoneReason(json["done_reason"] as? String) : nil,
             usage: isDone ? UsageStats(promptTokens: promptTokens, completionTokens: completionTokens) : nil
         )
     }
@@ -457,7 +460,7 @@ public actor OllamaProvider: AIProvider, TextGenerator {
     private nonisolated func generationResult(text: String, json: [String: Any]) -> GenerationResult {
         let completionTokens = json["eval_count"] as? Int ?? 0
         let promptTokens = json["prompt_eval_count"] as? Int ?? 0
-        let finishReason: FinishReason = (json["done"] as? Bool) == false ? .maxTokens : .stop
+        let finishReason = mapDoneReason(json["done_reason"] as? String)
         return GenerationResult(
             text: text,
             tokenCount: completionTokens,
@@ -466,6 +469,30 @@ public actor OllamaProvider: AIProvider, TextGenerator {
             finishReason: finishReason,
             usage: UsageStats(promptTokens: promptTokens, completionTokens: completionTokens)
         )
+    }
+
+    private nonisolated func serializeToolDefinition(_ tool: Transcript.ToolDefinition) -> [String: Any] {
+        [
+            "type": "function",
+            "function": [
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters.toJSONSchema()
+            ]
+        ]
+    }
+
+    private nonisolated func mapDoneReason(_ reason: String?) -> FinishReason {
+        switch reason?.lowercased() {
+        case nil, "", "stop":
+            return .stop
+        case "length", "max_tokens", "num_predict":
+            return .maxTokens
+        case "tool_calls", "tool_call":
+            return .toolCalls
+        default:
+            return .stop
+        }
     }
 
     private nonisolated func imagePayloads(from content: Message.Content) -> [String] {

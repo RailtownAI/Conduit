@@ -112,6 +112,24 @@ struct GeminiProviderTests {
         #expect(result.toolCalls.first?.metadata["thoughtSignature"]?.stringValue == "sig-123")
     }
 
+    @Test("response parsing preserves Gemini finish reason")
+    func responseParsingPreservesFinishReason() throws {
+        let provider = GeminiProvider(apiKey: "test-key")
+        let data = Data("""
+        {
+          "candidates": [{
+            "finishReason": "MAX_TOKENS",
+            "content": { "parts": [{ "text": "Partial" }] }
+          }]
+        }
+        """.utf8)
+
+        let result = try provider.parseGenerationResponse(data: data)
+
+        #expect(result.text == "Partial")
+        #expect(result.finishReason == .maxTokens)
+    }
+
     @Test("tool call history serializes function calls and function responses")
     func toolCallHistorySerialization() throws {
         let provider = GeminiProvider(apiKey: "test-key")
@@ -148,13 +166,22 @@ struct GeminiProviderTests {
     }
 
     @Test("stream event parsing returns chunks")
-    func streamEventParsing() {
+    func streamEventParsing() throws {
         let provider = GeminiProvider(apiKey: "test-key")
-        let chunk = provider.decodeStreamEvent("""
+        let chunk = try provider.decodeStreamEvent("""
         {"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}
         """)
 
         #expect(chunk?.text == "Hi")
+    }
+
+    @Test("stream event parsing surfaces Gemini API errors")
+    func streamEventParsingSurfacesAPIErrors() {
+        let provider = GeminiProvider(apiKey: "test-key")
+
+        #expect(throws: AIError.self) {
+            _ = try provider.decodeStreamEvent(#"{"error":{"code":400,"message":"bad request"}}"#)
+        }
     }
 
     @Test("streaming request targets Gemini SSE endpoint")

@@ -18,6 +18,7 @@ private actor CompatibilityProvider: AIProvider, @preconcurrency TextGenerator {
     private var queuedResults: [GenerationResult]
     private var streamedChunks: [String]
     private(set) var receivedMessages: [[Message]] = []
+    private(set) var receivedConfigs: [GenerateConfig] = []
 
     init(results: [GenerationResult], streamedChunks: [String] = []) {
         self.queuedResults = results
@@ -29,6 +30,7 @@ private actor CompatibilityProvider: AIProvider, @preconcurrency TextGenerator {
 
     func generate(messages: [Message], model: ModelIdentifier, config: GenerateConfig) async throws -> GenerationResult {
         receivedMessages.append(messages)
+        receivedConfigs.append(config)
         guard !queuedResults.isEmpty else { return .text("ok") }
         return queuedResults.removeFirst()
     }
@@ -91,6 +93,10 @@ private actor CompatibilityProvider: AIProvider, @preconcurrency TextGenerator {
 
     private func currentStreamedChunks() -> [String] {
         streamedChunks
+    }
+
+    func configs() -> [GenerateConfig] {
+        receivedConfigs
     }
 }
 
@@ -198,6 +204,43 @@ struct ConduitLanguageModelSessionTests {
         #expect(session.transcript.contains { if case .toolCalls = $0 { true } else { false } })
         #expect(session.transcript.contains { if case .toolOutput = $0 { true } else { false } })
         #expect(session.transcript.contains { if case .response = $0 { true } else { false } })
+    }
+
+    @Test("respond(to:) preserves session tools when prompt options override runtime config")
+    func respondPreservesSessionToolsWithPromptOptions() async throws {
+        let toolCall = try Transcript.ToolCall(
+            id: "call-1",
+            toolName: "weather",
+            argumentsJSON: #"{"city":"SF"}"#
+        )
+        let provider = CompatibilityProvider(results: [
+            GenerationResult(
+                text: "",
+                tokenCount: 0,
+                generationTime: 0,
+                tokensPerSecond: 0,
+                finishReason: .toolCalls,
+                toolCalls: [toolCall]
+            ),
+            .text("It is clear.")
+        ])
+        let model = ConduitLanguageModel(
+            provider: .custom(provider, mapModel: { _ in .openAI("test-model") }),
+            model: .openAI("test-model")
+        )
+        let session = try ConduitLanguageModelSession(
+            model: model,
+            tools: [CompatibilityWeatherTool()]
+        )
+
+        _ = try await session.respond(
+            to: "Check weather",
+            options: GenerationOptions(maximumResponseTokens: 32)
+        )
+
+        let configs = await provider.configs()
+        #expect(configs.first?.maxTokens == 32)
+        #expect(configs.first?.tools.map(\.name) == ["weather"])
     }
 
     @Test("streamResponse(to:generating:) yields partial Generable snapshots")
