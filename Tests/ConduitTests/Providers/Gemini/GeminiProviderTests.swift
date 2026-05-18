@@ -157,6 +157,20 @@ struct GeminiProviderTests {
         #expect(chunk?.text == "Hi")
     }
 
+    @Test("streaming request targets Gemini SSE endpoint")
+    func streamingRequestTargetsSSEEndpoint() throws {
+        let provider = GeminiProvider(apiKey: "test-key")
+        let request = provider.makeStreamRequest(
+            model: .gemini("gemini-3-flash-preview"),
+            body: Data(#"{"contents":[]}"#.utf8)
+        )
+
+        let url = try #require(request.url?.absoluteString)
+        #expect(request.httpMethod == "POST")
+        #expect(url.contains(":streamGenerateContent"))
+        #expect(url.contains("alt=sse"))
+    }
+
     @Test("API error maps to AIError.serverError")
     func apiErrorMapping() {
         let provider = GeminiProvider(apiKey: "test-key")

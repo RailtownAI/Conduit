@@ -95,8 +95,11 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    let result = try await generate(prompt, model: model, config: config)
-                    continuation.yield(result)
+                    for try await chunk in streamWithMetadata(messages: [.user(prompt)], model: model, config: config) {
+                        if !chunk.text.isEmpty {
+                            continuation.yield(chunk.text)
+                        }
+                    }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -121,9 +124,12 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    let result = try await generate(messages: messages, model: model, config: config)
-                    continuation.yield(GenerationChunk(text: result.text, tokenCount: result.tokenCount, isComplete: true, finishReason: result.finishReason, usage: result.usage))
-                    continuation.finish()
+                    try await self.performStreamingGeneration(
+                        messages: messages,
+                        model: model,
+                        config: config,
+                        continuation: continuation
+                    )
                 } catch {
                     continuation.finish(throwing: error)
                 }
@@ -132,6 +138,31 @@ public actor GeminiProvider: AIProvider, TextGenerator {
     }
 
     public func cancelGeneration() async {}
+
+    private func performStreamingGeneration(
+        messages: [Message],
+        model: ModelIdentifier,
+        config: GenerateConfig,
+        continuation: AsyncThrowingStream<GenerationChunk, Error>.Continuation
+    ) async throws {
+        let body = buildRequestBody(messages: messages, model: model, config: config)
+        let data = try JSONSerialization.data(withJSONObject: body)
+        let (bytes, response) = try await session.asyncBytes(for: makeStreamRequest(model: model, body: data))
+        try validate(response: response, data: Data())
+
+        var parser = ServerSentEventParser()
+        for try await line in bytes.lines {
+            for event in parser.ingestLine(line) {
+                guard let chunk = decodeStreamEvent(event.data) else { continue }
+                continuation.yield(chunk)
+            }
+        }
+        for event in parser.finish() {
+            guard let chunk = decodeStreamEvent(event.data) else { continue }
+            continuation.yield(chunk)
+        }
+        continuation.finish()
+    }
 
     public nonisolated func buildRequestBody(
         messages: [Message],
@@ -278,6 +309,25 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = body
+        request.setValue(configuration.apiKey, forHTTPHeaderField: "x-goog-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (header, value) in configuration.defaultHeaders {
+            request.setValue(value, forHTTPHeaderField: header)
+        }
+        return request
+    }
+
+    nonisolated func makeStreamRequest(model: ModelIdentifier, body: Data) -> URLRequest {
+        let url = configuration.baseURL
+            .appendingPathComponent("models")
+            .appendingPathComponent(model.rawValue + ":streamGenerateContent")
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "alt", value: "sse")]
+
+        var request = URLRequest(url: components?.url ?? url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.timeoutInterval = configuration.timeout
         request.setValue(configuration.apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         for (header, value) in configuration.defaultHeaders {

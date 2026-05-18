@@ -118,6 +118,19 @@ struct OllamaProviderTests {
         }
     }
 
+    @Test("intermediate streaming chat chunks do not expose terminal finish reason")
+    func intermediateStreamingChatChunkHasNoFinishReason() throws {
+        let provider = OllamaProvider(configuration: .init(baseURL: URL(string: "http://localhost:11434/api")!))
+
+        let chunk = try provider.parseChatStreamChunk(Data("""
+        {"message":{"content":"hel"},"done":false}
+        """.utf8))
+
+        #expect(chunk.text == "hel")
+        #expect(chunk.isComplete == false)
+        #expect(chunk.finishReason == nil)
+    }
+
     @Test("requests carry configured timeout for streaming and pull paths")
     func requestTimeoutUsesConfiguration() {
         let provider = OllamaProvider(configuration: .init(

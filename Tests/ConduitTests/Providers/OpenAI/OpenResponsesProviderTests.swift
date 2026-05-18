@@ -3,6 +3,10 @@ import Foundation
 import Testing
 @testable import ConduitAdvanced
 
+private struct OpenAIOnlyOptions: Codable, Sendable, Equatable {
+    var mode: String
+}
+
 @Suite("OpenResponsesProvider")
 struct OpenResponsesProviderTests {
     @Test("factory configures Responses variant and custom base URL")
@@ -50,6 +54,19 @@ struct OpenResponsesProviderTests {
         #expect(body["truncation"] as? String == "auto")
         #expect((body["metadata"] as? [String: Any])?["trace_id"] as? String == "abc")
         #expect(body["store"] as? Bool == false)
+    }
+
+    @Test("Open Responses custom options do not collide with OpenAIProvider options")
+    func customOptionsAreIsolatedFromOpenAIProvider() {
+        var config = GenerateConfig.default
+        config[custom: OpenResponsesProvider.self] = OpenResponsesOptions(verbosity: "low")
+        config[custom: OpenAIProvider.self] = OpenAIOnlyOptions(mode: "chat")
+
+        let responsesOptions: OpenResponsesOptions? = config[custom: OpenResponsesProvider.self]
+        let openAIOptions: OpenAIOnlyOptions? = config[custom: OpenAIProvider.self]
+
+        #expect(responsesOptions?.verbosity == "low")
+        #expect(openAIOptions == OpenAIOnlyOptions(mode: "chat"))
     }
 }
 #endif

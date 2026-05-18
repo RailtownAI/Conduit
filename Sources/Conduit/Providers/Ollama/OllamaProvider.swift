@@ -275,8 +275,7 @@ public actor OllamaProvider: AIProvider, TextGenerator {
         let (bytes, response) = try await session.asyncBytes(for: request)
         try validate(response: response, data: Data())
         for try await line in bytes.lines where !line.isEmpty {
-            let result = try parseChatResponse(Data(line.utf8))
-            continuation.yield(GenerationChunk(text: result.text, tokenCount: result.tokenCount, isComplete: result.finishReason == .stop, finishReason: result.finishReason, usage: result.usage))
+            continuation.yield(try parseChatStreamChunk(Data(line.utf8)))
         }
         continuation.finish()
     }
@@ -357,6 +356,22 @@ public actor OllamaProvider: AIProvider, TextGenerator {
         try throwIfOllamaError(json)
         let text = ((json["message"] as? [String: Any])?["content"] as? String) ?? ""
         return generationResult(text: text, json: json)
+    }
+
+    public nonisolated func parseChatStreamChunk(_ data: Data) throws -> GenerationChunk {
+        let json = try jsonObject(data)
+        try throwIfOllamaError(json)
+        let text = ((json["message"] as? [String: Any])?["content"] as? String) ?? ""
+        let completionTokens = json["eval_count"] as? Int ?? 0
+        let promptTokens = json["prompt_eval_count"] as? Int ?? 0
+        let isDone = json["done"] as? Bool ?? false
+        return GenerationChunk(
+            text: text,
+            tokenCount: completionTokens,
+            isComplete: isDone,
+            finishReason: isDone ? .stop : nil,
+            usage: isDone ? UsageStats(promptTokens: promptTokens, completionTokens: completionTokens) : nil
+        )
     }
 
     public nonisolated func parseModelList(_ data: Data) throws -> [OllamaModelSummary] {
