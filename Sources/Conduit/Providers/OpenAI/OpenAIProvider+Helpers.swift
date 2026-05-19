@@ -690,6 +690,8 @@ extension OpenAIProvider {
                 userInfo: [NSLocalizedDescriptionKey: "Invalid response format. Preview: \(preview)"]
             )))
         }
+        
+        let systemFingerprint = json["system_fingerprint"] as? String
 
         // Content may be null when tool calls are present
         let content = message["content"] as? String ?? ""
@@ -744,6 +746,7 @@ extension OpenAIProvider {
             generationTime: 0, // Not available in non-streaming mode
             tokensPerSecond: 0,
             finishReason: finishReason,
+            providerExtra: systemFingerprint.map { ["system_fingerprint": $0] },
             usage: usage,
             toolCalls: toolCalls,
             reasoningDetails: reasoningDetails
