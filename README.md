@@ -1,11 +1,4 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.svg">
-    <img src="docs/assets/banner-light.svg" alt="Conduit Banner" width="100%">
-  </picture>
-</p>
-
-<p align="center">
   <a href="https://swift.org">
     <img src="https://img.shields.io/badge/Swift-6.2-F05138.svg?style=flat&logo=swift" alt="Swift 6.2">
   </a>
