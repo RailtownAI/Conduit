@@ -21,7 +21,9 @@
 </p>
 
 <p align="center">
-  <b>Conduit</b> is a type-safe Swift framework for working with cloud and on-device language models through one API.
+  <b>Conduit</b> — type-safe LLM inference for Swift.
+  <br>
+  One API. Every provider. Compile-time schemas. Native SwiftUI.
 </p>
 
 <p align="center">
@@ -33,75 +35,181 @@
 
 ---
 
-## What it gives you
+## What Conduit gives you
 
-- **Fast local inference:** tuned for Apple Silicon with first-class **MLX** support.
-- **Type-safe structured output:** **Swift 6 macros** validate your generated shapes at compile time.
-- **One surface for multiple providers:** switching between Claude, GPT-4o, and local models is a small config change.
-- **Actor-based providers:** the concurrency model stays explicit and thread-safe.
+- **Compile-time validated schemas** — Define the shape of LLM output with `@Generable` and catch mismatches before you ship.
+- **One API for every provider** — Claude, GPT-4o, Gemini, Ollama, MLX, CoreML, llama.cpp. Swap providers without rewriting your app.
+- **Native tool calling** — Expose Swift functions to models with strongly-typed arguments. The tool loop is handled for you.
+- **Streaming + SwiftUI ready** — `AsyncSequence` streaming and an `@Observable` `ChatSession` that drops into a `View`.
+- **Fast local inference** — First-class MLX support tuned for Apple Silicon.
 
 ---
 
-## Performance
+## Installation
 
-Conduit is tuned for Apple Silicon and local model throughput. The chart below shows the kind of token rates you can expect on recent M-series hardware.
+### Swift Package Manager
 
-<p align="center">
-  <svg width="600" height="200" viewBox="0 0 600 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="600" height="200" rx="12" fill="#1C1C1E"/>
-    <path d="M50 150L150 120L250 130L350 80L450 60L550 40" stroke="#007AFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="50" y="180" fill="#8E8E93" font-family="SF Pro, sans-serif" font-size="12">M1</text>
-    <text x="250" y="180" fill="#8E8E93" font-family="SF Pro, sans-serif" font-size="12">M2 Max</text>
-    <text x="550" y="180" fill="#8E8E93" font-family="SF Pro, sans-serif" font-size="12">M3 Max</text>
-    <text x="20" y="40" fill="#8E8E93" font-family="SF Pro, sans-serif" font-size="12" transform="rotate(-90 20 40)">Tokens/sec</text>
-  </svg>
-</p>
-<p align="center"><i>Benchmark: Token throughput on M3 Max (Llama 3.1 8B, 4-bit Quantized)</i></p>
+```bash
+swift package add --url https://github.com/christopherkarani/Conduit --from 0.3.0
+```
+
+Or add it in Xcode: **File → Add Package Dependencies** → `https://github.com/christopherkarani/Conduit`
+
+### Enable Provider Traits
+
+Conduit uses Swift 6 package traits to keep compile times fast and binaries small. **You must enable the traits for the providers you want to use.**
+
+```swift
+// Package.swift
+.package(
+    url: "https://github.com/christopherkarani/Conduit",
+    from: "0.3.0",
+    traits: ["Anthropic", "OpenAI", "MLX"] // ← pick your providers
+)
+```
+
+**Available traits:** `Anthropic`, `OpenAI`, `OpenRouter`, `Gemini`, `Kimi`, `MiniMax`, `MLX`, `CoreML`, `Ollama`, `Llama`, `HuggingFaceHub`
+
+> **Linux or server-side?** Skip `MLX`. Cloud providers work out of the box. For local inference on Linux, use the `Ollama` trait.
 
 ---
 
 ## Start Here
 
-The default path is intentionally small:
+### 1. Generate text in 4 lines
 
 ```swift
 import Conduit
 
-// 1. Initialize your provider
-let app = Conduit(.anthropic(apiKey: "sk-ant-..."))
-
-// 2. Create a session with modern async/await
-let session = try app.session(model: .anthropic("claude-opus-4-6"))
-
-// 3. Run and get type-safe results
-let response = try await session.run("Explain the benefits of Swift Actors.")
+let provider = AnthropicProvider(apiKey: "sk-ant-...")
+let response = try await provider.generate(
+    "Explain the benefits of Swift Actors",
+    model: .claudeSonnet45,
+    config: .default.maxTokens(300)
+)
 print(response)
 ```
 
-### Provider Swap in One Line
+### 2. Get structured, type-safe output
 
-Moving from cloud to local mostly means swapping the provider initializer:
+This is Conduit's superpower. Define a Swift struct, attach `@Generable`, and the LLM returns a validated instance.
 
 ```swift
-// From Cloud...
-let cloud = Conduit(.openAI(apiKey: "sk-..."))
+import Conduit
 
-// ...to Local Apple Silicon (MLX)
-let local = Conduit(.mlx())
-let localSession = try local.session(model: .mlxLocal("/Users/me/models/Llama-3.2-1B-Instruct-4bit"))
+@Generable
+struct MovieReview {
+    let title: String
+    let rating: Int
+    @Guide("One-paragraph summary")
+    let summary: String
+    let pros: [String]
+    let cons: [String]
+}
+
+let provider = AnthropicProvider(apiKey: "sk-ant-...")
+let result = try await provider.generate(
+    messages: Messages { Message.user("Review the movie Inception") },
+    model: .claudeSonnet45,
+    config: .default.responseFormat(.jsonSchema(MovieReview.generationSchema))
+)
+
+let review = try MovieReview(GeneratedContent(json: result.text))
+print(review.rating) // 9
+```
+
+### 3. Let models call your Swift functions
+
+```swift
+@Generable
+struct WeatherArgs {
+    @Guide("City name") let city: String
+    @Guide("Unit", .anyOf(["celsius", "fahrenheit"])) let unit: String
+}
+
+struct WeatherTool: Tool {
+    let name = "get_weather"
+    let description = "Get current weather"
+    func call(arguments: WeatherArgs) async throws -> String {
+        return "72°F and sunny in \(arguments.city)"
+    }
+}
+
+let result = try await provider.generate(
+    messages: Messages { Message.user("What's the weather in Tokyo?") },
+    model: .claudeSonnet45,
+    config: .default.tools([WeatherTool()])
+)
+```
+
+### 4. Swap providers without changing your logic
+
+```swift
+// Cloud
+let anthropic = AnthropicProvider(apiKey: "sk-ant-...")
+
+// Local Apple Silicon (MLX)
+let mlx = MLXProvider()
+
+// Local via Ollama
+let ollama = OpenAIProvider(ollamaHost: "localhost", port: 11434)
+
+// Same generate() API on every provider.
+```
+
+### 5. Drop a chat session into SwiftUI
+
+```swift
+import SwiftUI
+import Conduit
+
+struct ChatView: View {
+    @State private var session = ChatSession(
+        provider: AnthropicProvider(apiKey: "sk-ant-..."),
+        model: .claudeSonnet45
+    )
+    @State private var input = ""
+
+    var body: some View {
+        VStack {
+            ScrollView { /* messages */ }
+            HStack {
+                TextField("Message", text: $input)
+                Button("Send") {
+                    Task {
+                        let reply = try await session.send(input)
+                        input = ""
+                        // append reply to UI
+                    }
+                }
+            }
+        }
+    }
+}
 ```
 
 ---
 
 ## Documentation
 
-The docs cover the main pieces without much ceremony:
+- [**Getting Started**](docs/guide/getting-started.md) — Installation, traits, and your first generation.
+- [**Structured Output**](docs/guide/structured-output.md) — `@Generable`, `@Guide`, and compile-time schemas.
+- [**Tool Calling**](docs/guide/tool-calling.md) — Native Swift tools with automatic tool loops.
+- [**Streaming**](docs/guide/streaming.md) — Real-time `AsyncSequence` streaming.
+- [**Chat Session**](docs/guide/chat-session.md) — `ChatSession`, history, and SwiftUI integration.
+- [**Architecture**](docs/guide/architecture.md) — How Conduit is put together.
 
-- [**Getting Started**](docs/guide/getting-started.md): installation and your first generation.
-- [**Structured Output**](docs/guide/structured-output.md): type-safe JSON with `@Generable`.
-- [**Tool Calling**](docs/guide/tool-calling.md): extending LLMs with native Swift functions.
-- [**Streaming**](docs/guide/streaming.md): real-time token streaming with `AsyncSequence`.
-- [**Architecture**](docs/guide/architecture.md): how Conduit is put together.
+---
+
+## Performance
+
+Conduit is tuned for Apple Silicon and local model throughput.
+
+| Hardware | Model | Quantization | Tokens/sec |
+|---|---|---|---|
+| M3 Max | Llama 3.1 8B | 4-bit | ~85 |
+| M2 Max | Llama 3.1 8B | 4-bit | ~62 |
+| M1 Pro | Llama 3.2 1B | 4-bit | ~120 |
 
 ---
 
