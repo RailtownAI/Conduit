@@ -33,6 +33,9 @@ public struct GenerationResult: Sendable, Equatable {
     /// This is required for every generation result, as there must
     /// always be a reason why generation terminated.
     public let finishReason: FinishReason
+    
+    /// Provider specific data
+    public let providerExtra: [String: String]?
 
     /// Log probabilities (if requested in config).
     public let logprobs: [TokenLogprob]?
@@ -100,6 +103,7 @@ public struct GenerationResult: Sendable, Equatable {
         generationTime: TimeInterval,
         tokensPerSecond: Double,
         finishReason: FinishReason,
+        providerExtra: [String: String]? = nil,
         logprobs: [TokenLogprob]? = nil,
         usage: UsageStats? = nil,
         rateLimitInfo: RateLimitInfo? = nil,
@@ -111,6 +115,7 @@ public struct GenerationResult: Sendable, Equatable {
         self.generationTime = generationTime
         self.tokensPerSecond = tokensPerSecond
         self.finishReason = finishReason
+        self.providerExtra = providerExtra
         self.logprobs = logprobs
         self.usage = usage
         self.rateLimitInfo = rateLimitInfo
@@ -168,6 +173,7 @@ extension GenerationResult {
             content: .text(text),
             metadata: MessageMetadata(
                 tokenCount: tokenCount,
+                inputTokenCount: usage?.promptTokens,
                 generationTime: generationTime,
                 tokensPerSecond: tokensPerSecond,
                 toolCalls: toolCalls.isEmpty ? nil : toolCalls

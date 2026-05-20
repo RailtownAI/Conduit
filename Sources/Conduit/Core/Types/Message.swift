@@ -21,8 +21,11 @@ import Foundation
 /// ```
 public struct MessageMetadata: Sendable, Hashable, Codable {
 
-    /// Number of tokens in the message.
+    /// Number of output tokens in the message.
     public var tokenCount: Int?
+    
+    /// Number of input tokens in the message.
+    public var inputTokenCount: Int?
 
     /// Time taken to generate this message (in seconds).
     public var generationTime: TimeInterval?
@@ -32,6 +35,9 @@ public struct MessageMetadata: Sendable, Hashable, Codable {
 
     /// Tokens generated per second (throughput).
     public var tokensPerSecond: Double?
+    
+    /// Custom provider-specific metadata
+    public var providerExtra: [String: String]?
 
     /// Custom application-specific metadata.
     public var custom: [String: String]?
@@ -52,16 +58,20 @@ public struct MessageMetadata: Sendable, Hashable, Codable {
     ///   - custom: Custom key-value pairs for application-specific data.
     public init(
         tokenCount: Int? = nil,
+        inputTokenCount: Int? = nil,
         generationTime: TimeInterval? = nil,
         model: String? = nil,
         tokensPerSecond: Double? = nil,
+        providerExtra: [String: String]? = nil,
         custom: [String: String]? = nil,
         toolCalls: [Transcript.ToolCall]? = nil
     ) {
         self.tokenCount = tokenCount
+        self.inputTokenCount = inputTokenCount
         self.generationTime = generationTime
         self.model = model
         self.tokensPerSecond = tokensPerSecond
+        self.providerExtra = providerExtra
         self.custom = custom
         self.toolCalls = toolCalls
     }

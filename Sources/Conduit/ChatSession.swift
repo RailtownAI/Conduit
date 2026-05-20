@@ -614,9 +614,11 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
                     content: .text(result.text),
                     metadata: MessageMetadata(
                         tokenCount: result.tokenCount,
+                        inputTokenCount: result.usage?.promptTokens,
                         generationTime: result.generationTime,
                         model: currentModel.rawValue,
                         tokensPerSecond: result.tokensPerSecond,
+                        providerExtra: result.providerExtra,
                         toolCalls: result.toolCalls.isEmpty ? nil : result.toolCalls
                     )
                 )
