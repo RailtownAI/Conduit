@@ -125,7 +125,9 @@ extension OpenAIProvider {
 
         // Add generation config
         if let maxTokens = config.maxTokens {
-            body["max_tokens"] = maxTokens
+            // o-series reasoning models and gpt-5+ reject "max_tokens"; use the newer key.
+            let tokenKey = requiresMaxCompletionTokens(model: model) ? "max_completion_tokens" : "max_tokens"
+            body[tokenKey] = maxTokens
         }
 
         body["temperature"] = config.temperature.openAIJSONNumber
@@ -574,6 +576,12 @@ extension OpenAIProvider {
                 ]
             ]
         }
+    }
+
+    /// Returns true for models that require `max_completion_tokens` instead of `max_tokens`.
+    private nonisolated func requiresMaxCompletionTokens(model: ModelIdentifier) -> Bool {
+        let id = model.rawValue
+        return id.hasPrefix("o1") || id.hasPrefix("o3") || id.hasPrefix("o4") || id.hasPrefix("gpt-5")
     }
 
     /// Serializes reasoning configuration.
