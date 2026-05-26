@@ -130,19 +130,22 @@ extension OpenAIProvider {
             body[tokenKey] = maxTokens
         }
 
-        body["temperature"] = config.temperature.openAIJSONNumber
-        body["top_p"] = config.topP.openAIJSONNumber
+        // o-series and gpt-5+ only accept default values for these sampling params; omit them entirely.
+        if !requiresMaxCompletionTokens(model: model) {
+            body["temperature"] = config.temperature.openAIJSONNumber
+            body["top_p"] = config.topP.openAIJSONNumber
 
-        if let topK = config.topK {
-            body["top_k"] = topK
-        }
+            if let topK = config.topK {
+                body["top_k"] = topK
+            }
 
-        if config.frequencyPenalty != 0 {
-            body["frequency_penalty"] = config.frequencyPenalty.openAIJSONNumber
-        }
+            if config.frequencyPenalty != 0 {
+                body["frequency_penalty"] = config.frequencyPenalty.openAIJSONNumber
+            }
 
-        if config.presencePenalty != 0 {
-            body["presence_penalty"] = config.presencePenalty.openAIJSONNumber
+            if config.presencePenalty != 0 {
+                body["presence_penalty"] = config.presencePenalty.openAIJSONNumber
+            }
         }
 
         if !config.stopSequences.isEmpty {
@@ -578,7 +581,8 @@ extension OpenAIProvider {
         }
     }
 
-    /// Returns true for models that require `max_completion_tokens` instead of `max_tokens`.
+    /// Returns true for models (o-series, gpt-5+) that require `max_completion_tokens`
+    /// and reject non-default sampling params (temperature, top_p, penalties).
     private nonisolated func requiresMaxCompletionTokens(model: ModelIdentifier) -> Bool {
         let id = model.rawValue
         return id.hasPrefix("o1") || id.hasPrefix("o3") || id.hasPrefix("o4") || id.hasPrefix("gpt-5")
