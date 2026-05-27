@@ -131,7 +131,13 @@ extension OpenAIProvider {
         }
 
         // o-series and gpt-5+ only accept default values for these sampling params; omit them entirely.
-        if !requiresMaxCompletionTokens(model: model) {
+        if requiresMaxCompletionTokens(model: model) {
+            let defaults = GenerateConfig.default
+            if config.temperature != defaults.temperature || config.topP != defaults.topP
+                || config.frequencyPenalty != defaults.frequencyPenalty || config.presencePenalty != defaults.presencePenalty {
+                logger.debug("Model '\(model.rawValue)' does not support custom sampling parameters; temperature, top_p, and penalties will be ignored.")
+            }
+        } else {
             body["temperature"] = config.temperature.openAIJSONNumber
             body["top_p"] = config.topP.openAIJSONNumber
 
@@ -261,8 +267,16 @@ extension OpenAIProvider {
         if let maxTokens = config.maxTokens {
             body["max_output_tokens"] = maxTokens
         }
-        body["temperature"] = config.temperature.openAIJSONNumber
-        body["top_p"] = config.topP.openAIJSONNumber
+
+        if requiresMaxCompletionTokens(model: model) {
+            let defaults = GenerateConfig.default
+            if config.temperature != defaults.temperature || config.topP != defaults.topP {
+                logger.debug("Model '\(model.rawValue)' does not support custom sampling parameters; temperature and top_p will be ignored.")
+            }
+        } else {
+            body["temperature"] = config.temperature.openAIJSONNumber
+            body["top_p"] = config.topP.openAIJSONNumber
+        }
 
         if !config.stopSequences.isEmpty {
             body["stop"] = config.stopSequences
@@ -584,7 +598,9 @@ extension OpenAIProvider {
     /// Returns true for models (o-series, gpt-5+) that require `max_completion_tokens`
     /// and reject non-default sampling params (temperature, top_p, penalties).
     private nonisolated func requiresMaxCompletionTokens(model: ModelIdentifier) -> Bool {
-        let id = model.rawValue
+        let raw = model.rawValue
+        // Strip optional "provider/" prefix used by OpenRouter (e.g. "openai/gpt-5-mini" → "gpt-5-mini").
+        let id = raw.firstIndex(of: "/").map { String(raw[raw.index(after: $0)...]) } ?? raw
         return id.hasPrefix("o1") || id.hasPrefix("o3") || id.hasPrefix("o4") || id.hasPrefix("gpt-5")
     }
 
