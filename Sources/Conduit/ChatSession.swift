@@ -587,9 +587,9 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
         let currentToolCallRetryPolicy = capturedState.toolCallRetryPolicy
         let currentMaxToolCallRounds = capturedState.maxToolCallRounds
 
+        var turnMessages: [Message] = []
         do {
             var loopMessages = currentMessages
-            var turnMessages: [Message] = []
             var toolRoundCount = 0
             var finalResponseText = ""
 
@@ -682,12 +682,11 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
             return finalResponseText
 
         } catch {
-            // On error, remove user message and store error
+            // On error, keep user message and any partial turn messages (assistant tool-call
+            // requests, tool outputs accumulated before the failure) so callers can observe
+            // the full partial conversation trace for diagnostics and logging.
             withLock {
-                // Remove the user message we just added
-                if let index = messages.lastIndex(where: { $0.id == userMessage.id }) {
-                    messages.remove(at: index)
-                }
+                messages.append(contentsOf: turnMessages)
                 lastError = error
                 isGenerating = false
                 cancellationRequested = false
