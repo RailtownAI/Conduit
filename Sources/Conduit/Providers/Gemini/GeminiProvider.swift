@@ -197,7 +197,12 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         if let responseFormat = config.responseFormat {
             generationConfig["responseMimeType"] = "application/json"
             if case .jsonSchema(_, let schema) = responseFormat {
-                generationConfig["responseSchema"] = schema.toJSONSchema()
+                // Gemini's responseSchema is a flattened OpenAPI subset: it rejects JSON Schema
+                // references ($ref/$defs) and the `additionalProperties` field, so inline the
+                // references and omit additionalProperties before serializing.
+                generationConfig["responseSchema"] = schema.toJSONSchema(
+                    options: .init(referenceStrategy: .inline, omitAdditionalProperties: true)
+                )
             }
         }
 
@@ -216,7 +221,12 @@ public actor GeminiProvider: AIProvider, TextGenerator {
                     [
                         "name": tool.name,
                         "description": tool.description,
-                        "parameters": tool.parameters.toJSONSchema()
+                        // Gemini's function-declaration parameters are a flattened OpenAPI subset: they
+                        // reject JSON Schema references ($ref/$defs) and the `additionalProperties`
+                        // field, so inline the references and omit additionalProperties.
+                        "parameters": tool.parameters.toJSONSchema(
+                            options: .init(referenceStrategy: .inline, omitAdditionalProperties: true)
+                        )
                     ]
                 }
             ]]
