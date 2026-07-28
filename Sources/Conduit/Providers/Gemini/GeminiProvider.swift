@@ -197,9 +197,12 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         if let responseFormat = config.responseFormat {
             generationConfig["responseMimeType"] = "application/json"
             if case .jsonSchema(_, let schema) = responseFormat {
-                // Gemini's responseSchema is a flattened OpenAPI subset and rejects JSON Schema
-                // references ($ref/$defs), so inline them before serializing.
-                generationConfig["responseSchema"] = schema.toJSONSchema(options: .inlineReferences)
+                // Gemini's responseSchema is a flattened OpenAPI subset: it rejects JSON Schema
+                // references ($ref/$defs) and the `additionalProperties` field, so inline the
+                // references and omit additionalProperties before serializing.
+                generationConfig["responseSchema"] = schema.toJSONSchema(
+                    options: .init(referenceStrategy: .inline, omitAdditionalProperties: true)
+                )
             }
         }
 
@@ -218,9 +221,12 @@ public actor GeminiProvider: AIProvider, TextGenerator {
                     [
                         "name": tool.name,
                         "description": tool.description,
-                        // Gemini's function-declaration parameters are a flattened OpenAPI subset and
-                        // reject JSON Schema references ($ref/$defs), so inline them before serializing.
-                        "parameters": tool.parameters.toJSONSchema(options: .inlineReferences)
+                        // Gemini's function-declaration parameters are a flattened OpenAPI subset: they
+                        // reject JSON Schema references ($ref/$defs) and the `additionalProperties`
+                        // field, so inline the references and omit additionalProperties.
+                        "parameters": tool.parameters.toJSONSchema(
+                            options: .init(referenceStrategy: .inline, omitAdditionalProperties: true)
+                        )
                     ]
                 }
             ]]
