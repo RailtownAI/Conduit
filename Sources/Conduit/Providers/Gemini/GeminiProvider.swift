@@ -82,9 +82,26 @@ public actor GeminiProvider: AIProvider, TextGenerator {
     ) async throws -> GenerationResult {
         let body = buildRequestBody(messages: messages, model: model, config: config)
         let data = try JSONSerialization.data(withJSONObject: body)
+        let start = DispatchTime.now()
         let (responseData, response) = try await session.data(for: makeRequest(model: model, method: "generateContent", body: data))
         try validate(response: response, data: responseData)
-        return try parseGenerationResponse(data: responseData)
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
+        let result = try parseGenerationResponse(data: responseData)
+        let tokensPerSecond = elapsed > 0 ? Double(result.tokenCount) / elapsed : 0
+        // Gemini's response carries no latency; measure it around the request here (parse stays pure).
+        return GenerationResult(
+            text: result.text,
+            tokenCount: result.tokenCount,
+            generationTime: elapsed,
+            tokensPerSecond: tokensPerSecond,
+            finishReason: result.finishReason,
+            providerExtra: result.providerExtra,
+            logprobs: result.logprobs,
+            usage: result.usage,
+            rateLimitInfo: result.rateLimitInfo,
+            toolCalls: result.toolCalls,
+            reasoningDetails: result.reasoningDetails
+        )
     }
 
     public nonisolated func stream(
@@ -292,12 +309,16 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         }
 
         let finishReason = toolCalls.isEmpty ? mapFinishReason(first["finishReason"] as? String) : .toolCalls
+        let usageMetadata = json["usageMetadata"] as? [String: Any]
+        let promptTokens = usageMetadata?["promptTokenCount"] as? Int ?? 0
+        let completionTokens = usageMetadata?["candidatesTokenCount"] as? Int ?? 0
         return GenerationResult(
             text: toolCalls.isEmpty ? text : "",
-            tokenCount: 0,
+            tokenCount: completionTokens,
             generationTime: 0,
             tokensPerSecond: 0,
             finishReason: finishReason,
+            usage: UsageStats(promptTokens: promptTokens, completionTokens: completionTokens),
             toolCalls: toolCalls
         )
     }

@@ -185,6 +185,24 @@ public struct Message: Sendable, Hashable, Codable, Identifiable {
         Message(role: .user, content: .text(text))
     }
 
+    /// Creates a user message with arbitrary (possibly multimodal) content.
+    ///
+    /// Use this for multimodal input — e.g. text plus one or more images:
+    ///
+    /// ## Usage
+    /// ```swift
+    /// let userMsg = Message.user(content: .parts([
+    ///     .text("What's in this image?"),
+    ///     .image(Message.ImageContent(base64Data: base64, mimeType: "image/png"))
+    /// ]))
+    /// ```
+    ///
+    /// - Parameter content: The user's message content (text or multimodal parts).
+    /// - Returns: A message with `role: .user`.
+    public static func user(content: Content) -> Message {
+        Message(role: .user, content: content)
+    }
+
     /// Creates an assistant message with text content.
     ///
     /// Assistant messages represent AI-generated responses.

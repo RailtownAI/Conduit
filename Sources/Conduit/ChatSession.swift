@@ -540,17 +540,42 @@ public final class ChatSession<Provider: AIProvider & TextGenerator>: @unchecked
     /// - Throws: `AIError` if generation fails, or `CancellationError` if cancelled.
     @discardableResult
     public func send(_ content: String) async throws -> String {
-        try await sendImpl(content, config: nil)
+        try await sendImpl(.text(content), config: nil)
     }
 
     @discardableResult
     public func send(_ content: String, config configOverride: GenerateConfig) async throws -> String {
+        try await sendImpl(.text(content), config: configOverride)
+    }
+
+    /// Sends a message with arbitrary (possibly multimodal) content — e.g. text plus images.
+    ///
+    /// - Parameter content: The user message content (text or multimodal parts).
+    /// - Returns: The generated response text.
+    /// - Throws: `AIError` if generation fails, or `CancellationError` if cancelled.
+    @discardableResult
+    public func send(_ content: Message.Content) async throws -> String {
+        try await sendImpl(content, config: nil)
+    }
+
+    @discardableResult
+    public func send(_ content: Message.Content, config configOverride: GenerateConfig) async throws -> String {
         try await sendImpl(content, config: configOverride)
     }
 
-    private func sendImpl(_ content: String, config configOverride: GenerateConfig?) async throws -> String {
+    /// Sends a message built from multimodal content parts — e.g. `[.text(...), .image(...)]`.
+    ///
+    /// - Parameter parts: The user message content parts.
+    /// - Returns: The generated response text.
+    /// - Throws: `AIError` if generation fails, or `CancellationError` if cancelled.
+    @discardableResult
+    public func send(_ parts: [Message.ContentPart]) async throws -> String {
+        try await sendImpl(.parts(parts), config: nil)
+    }
+
+    private func sendImpl(_ content: Message.Content, config configOverride: GenerateConfig?) async throws -> String {
         // Create user message and prepare state
-        let userMessage = Message.user(content)
+        let userMessage = Message.user(content: content)
 
         // Capture state and add user message under lock
         let capturedState: (
