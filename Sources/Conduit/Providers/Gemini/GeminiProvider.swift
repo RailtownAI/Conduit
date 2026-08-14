@@ -28,19 +28,40 @@ public struct GeminiConfiguration: Sendable, Hashable, Codable {
 }
 
 public struct GeminiOptions: Sendable, Codable, Equatable {
+    /// Per-image token budget for multimodal input, sent as `generationConfig.mediaResolution`.
+    ///
+    /// Gemini allocates a flat number of tokens per image based on this setting — image dimensions do
+    /// not affect the count, so a thumbnail and a 4032x3024 photo cost the same. Measured on
+    /// `gemini-3-flash-preview`: `.low` 252 tokens, `.medium` 558, `.high` 1075, with `.high` as the
+    /// default. Lowering it is a cost and context-budget lever for workloads that do not need fine
+    /// detail; raising it matters for OCR, dense charts, and small objects.
+    ///
+    /// Support varies by model. Google documents the parameter as Gemini 3 only, and `.ultraHigh` is
+    /// rejected by `gemini-3-flash-preview` on `v1beta`. Models that do not support a level fail the
+    /// request rather than ignoring it, so set this only for models known to accept it.
+    public enum MediaResolution: String, Sendable, Codable, Equatable {
+        case low = "MEDIA_RESOLUTION_LOW"
+        case medium = "MEDIA_RESOLUTION_MEDIUM"
+        case high = "MEDIA_RESOLUTION_HIGH"
+        case ultraHigh = "MEDIA_RESOLUTION_ULTRA_HIGH"
+    }
+
     public var thinkingConfig: [String: JSONValue]?
     public var toolConfig: [String: JSONValue]?
+    public var mediaResolution: MediaResolution?
     public var serverTools: [[String: JSONValue]]
     public var extraBody: [String: JSONValue]
 
     public init(
         thinkingConfig: [String: JSONValue]? = nil,
         toolConfig: [String: JSONValue]? = nil,
+        mediaResolution: MediaResolution? = nil,
         serverTools: [[String: JSONValue]] = [],
         extraBody: [String: JSONValue] = [:]
     ) {
         self.thinkingConfig = thinkingConfig
         self.toolConfig = toolConfig
+        self.mediaResolution = mediaResolution
         self.serverTools = serverTools
         self.extraBody = extraBody
     }
@@ -252,8 +273,14 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         if let options: GeminiOptions = config[custom: GeminiProvider.self] {
             if let thinkingConfig = options.thinkingConfig {
                 generationConfig["thinkingConfig"] = thinkingConfig.mapValues(\.anyValue)
-                body["generationConfig"] = generationConfig
             }
+            if let mediaResolution = options.mediaResolution {
+                generationConfig["mediaResolution"] = mediaResolution.rawValue
+            }
+            // Re-assigned once, after every field above: `generationConfig` was copied into `body`
+            // before this block, so a mutation left inside one of the branches would be dropped
+            // whenever that branch did not run.
+            body["generationConfig"] = generationConfig
             if let toolConfig = options.toolConfig {
                 body["toolConfig"] = toolConfig.mapValues(\.anyValue)
             }

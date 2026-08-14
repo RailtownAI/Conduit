@@ -71,6 +71,69 @@ struct GeminiProviderTests {
         #expect(((body["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any])?["thinkingLevel"] as? String == "low")
     }
 
+    @Test("media resolution serializes into generation config")
+    func mediaResolutionSerializes() {
+        let provider = GeminiProvider(apiKey: "test-key")
+        var config = GenerateConfig.default
+        config[custom: GeminiProvider.self] = GeminiOptions(mediaResolution: .low)
+
+        let body = provider.buildRequestBody(
+            messages: [Message(role: .user, content: .parts([
+                .text("Describe"),
+                .image(Message.ImageContent(base64Data: "abc123", mimeType: "image/png"))
+            ]))],
+            model: .gemini("gemini-3-flash-preview"),
+            config: config
+        )
+
+        let generationConfig = body["generationConfig"] as? [String: Any]
+        #expect(generationConfig?["mediaResolution"] as? String == "MEDIA_RESOLUTION_LOW")
+    }
+
+    @Test("media resolution survives without a thinking config")
+    func mediaResolutionSurvivesAlone() {
+        // Regression guard: `generationConfig` is copied into the body before the options block, so
+        // an options field that only re-assigned it inside the `thinkingConfig` branch would vanish
+        // whenever thinkingConfig was nil — which is the common case.
+        let provider = GeminiProvider(apiKey: "test-key")
+        var config = GenerateConfig.default
+        config[custom: GeminiProvider.self] = GeminiOptions(
+            thinkingConfig: nil,
+            mediaResolution: .ultraHigh
+        )
+
+        let body = provider.buildRequestBody(
+            messages: [.user("Describe")],
+            model: .gemini("gemini-3-pro-preview"),
+            config: config
+        )
+
+        let generationConfig = body["generationConfig"] as? [String: Any]
+        #expect(generationConfig?["mediaResolution"] as? String == "MEDIA_RESOLUTION_ULTRA_HIGH")
+        // The pre-existing fields must still be there — the re-assignment overwrites the whole dict.
+        #expect(generationConfig?["temperature"] != nil)
+        #expect(generationConfig?["topP"] != nil)
+    }
+
+    @Test("omitted media resolution leaves the key out entirely")
+    func mediaResolutionOmittedByDefault() {
+        // Absent means "use the model default", which is not the same as sending any level
+        // explicitly — Gemini 3 defaults to high, but that is the server's business, not ours.
+        let provider = GeminiProvider(apiKey: "test-key")
+        var config = GenerateConfig.default
+        config[custom: GeminiProvider.self] = GeminiOptions(thinkingConfig: ["thinkingLevel": "low"])
+
+        let body = provider.buildRequestBody(
+            messages: [.user("Describe")],
+            model: .gemini("gemini-3-flash-preview"),
+            config: config
+        )
+
+        let generationConfig = body["generationConfig"] as? [String: Any]
+        #expect(generationConfig?["mediaResolution"] == nil)
+        #expect((generationConfig?["thinkingConfig"] as? [String: Any])?["thinkingLevel"] as? String == "low")
+    }
+
     @Test("multimodal image input serializes inline data")
     func multimodalImageInput() {
         let provider = GeminiProvider(apiKey: "test-key")
