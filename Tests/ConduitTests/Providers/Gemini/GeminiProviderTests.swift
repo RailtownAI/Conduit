@@ -104,10 +104,12 @@ struct GeminiProviderTests {
 
         let body = provider.buildRequestBody(
             messages: [.user("Describe")],
-            model: .gemini("gemini-3-pro-preview"),
+            model: .gemini("gemini-3.1-pro-preview"),
             config: config
         )
 
+        // Serialization is all this asserts. `.ultraHigh` is rejected by v1beta at request time — see
+        // the warning on `MediaResolution` — but the body must still carry what the caller asked for.
         let generationConfig = body["generationConfig"] as? [String: Any]
         #expect(generationConfig?["mediaResolution"] as? String == "MEDIA_RESOLUTION_ULTRA_HIGH")
         // The pre-existing fields must still be there — the re-assignment overwrites the whole dict.

@@ -30,15 +30,29 @@ public struct GeminiConfiguration: Sendable, Hashable, Codable {
 public struct GeminiOptions: Sendable, Codable, Equatable {
     /// Per-image token budget for multimodal input, sent as `generationConfig.mediaResolution`.
     ///
-    /// Gemini allocates a flat number of tokens per image based on this setting — image dimensions do
-    /// not affect the count, so a thumbnail and a 4032x3024 photo cost the same. Measured on
-    /// `gemini-3-flash-preview`: `.low` 252 tokens, `.medium` 558, `.high` 1075, with `.high` as the
-    /// default. Lowering it is a cost and context-budget lever for workloads that do not need fine
-    /// detail; raising it matters for OCR, dense charts, and small objects.
+    /// Both Gemini 3 and 2.5 honor this, but they differ in what each level costs *and* in which level
+    /// they default to — so moving an unchanged vision workload between the two families changes its
+    /// input cost. Per-image tokens, measured against `:countTokens` on `v1beta`:
     ///
-    /// Support varies by model. Google documents the parameter as Gemini 3 only, and `.ultraHigh` is
-    /// rejected by `gemini-3-flash-preview` on `v1beta`. Models that do not support a level fail the
-    /// request rather than ignoring it, so set this only for models known to accept it.
+    /// | Family | `.low` | `.medium` | `.high` |
+    /// |---|---|---|---|
+    /// | Gemini 3.x | 252 | 558 | **1075** (default) |
+    /// | Gemini 2.5 | 66 | **258** (default) | tiles with image size |
+    ///
+    /// On Gemini 3 every level is a flat allocation: a 300px thumbnail and a 3072px photo both cost
+    /// the level's figure. The same holds for `.low` and `.medium` on 2.5. The exception is `.high` on
+    /// 2.5, which tiles — 258 tokens for an image within 384px on both sides, rising with dimensions
+    /// (2322 measured at 3072x1786). Only there do image dimensions drive cost.
+    ///
+    /// Lowering the level is a cost and context-budget lever for work that does not need fine detail;
+    /// the ceiling matters for OCR, dense charts, and small objects.
+    ///
+    /// - Warning: `.ultraHigh` currently fails. Google documents the level, but `v1beta` — the version
+    ///   this provider targets — rejects it as an unknown enum value on every model tested, Flash and
+    ///   Pro, 3.x and 2.5 alike, with HTTP 400. It is kept here because the API documents it and
+    ///   because `extraBody` cannot reach `generationConfig` (a reserved key), so dropping the case
+    ///   would leave callers with no way to send the value if Google enables it. Do not use it without
+    ///   verifying against the model you target.
     public enum MediaResolution: String, Sendable, Codable, Equatable {
         case low = "MEDIA_RESOLUTION_LOW"
         case medium = "MEDIA_RESOLUTION_MEDIUM"
