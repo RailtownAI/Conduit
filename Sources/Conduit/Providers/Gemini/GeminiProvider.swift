@@ -28,19 +28,54 @@ public struct GeminiConfiguration: Sendable, Hashable, Codable {
 }
 
 public struct GeminiOptions: Sendable, Codable, Equatable {
+    /// Per-image token budget for multimodal input, sent as `generationConfig.mediaResolution`.
+    ///
+    /// Both Gemini 3 and 2.5 honor this, but they differ in what each level costs *and* in which level
+    /// they default to — so moving an unchanged vision workload between the two families changes its
+    /// input cost. Per-image tokens, measured against `:countTokens` on `v1beta`:
+    ///
+    /// | Family | `.low` | `.medium` | `.high` |
+    /// |---|---|---|---|
+    /// | Gemini 3.x | 252 | 558 | **1075** (default) |
+    /// | Gemini 2.5 | 66 | **258** (default) | tiles with image size |
+    ///
+    /// On Gemini 3 every level is a flat allocation: a 300px thumbnail and a 3072px photo both cost
+    /// the level's figure. The same holds for `.low` and `.medium` on 2.5. The exception is `.high` on
+    /// 2.5, which tiles — 258 tokens for an image within 384px on both sides, rising with dimensions
+    /// (2322 measured at 3072x1786). Only there do image dimensions drive cost.
+    ///
+    /// Lowering the level is a cost and context-budget lever for work that does not need fine detail;
+    /// the ceiling matters for OCR, dense charts, and small objects.
+    ///
+    /// - Warning: `.ultraHigh` currently fails. Google documents the level, but `v1beta` — the version
+    ///   this provider targets — rejects it as an unknown enum value on every model tested, Flash and
+    ///   Pro, 3.x and 2.5 alike, with HTTP 400. It is kept here because the API documents it and
+    ///   because `extraBody` cannot reach `generationConfig` (a reserved key), so dropping the case
+    ///   would leave callers with no way to send the value if Google enables it. Do not use it without
+    ///   verifying against the model you target.
+    public enum MediaResolution: String, Sendable, Codable, Equatable {
+        case low = "MEDIA_RESOLUTION_LOW"
+        case medium = "MEDIA_RESOLUTION_MEDIUM"
+        case high = "MEDIA_RESOLUTION_HIGH"
+        case ultraHigh = "MEDIA_RESOLUTION_ULTRA_HIGH"
+    }
+
     public var thinkingConfig: [String: JSONValue]?
     public var toolConfig: [String: JSONValue]?
+    public var mediaResolution: MediaResolution?
     public var serverTools: [[String: JSONValue]]
     public var extraBody: [String: JSONValue]
 
     public init(
         thinkingConfig: [String: JSONValue]? = nil,
         toolConfig: [String: JSONValue]? = nil,
+        mediaResolution: MediaResolution? = nil,
         serverTools: [[String: JSONValue]] = [],
         extraBody: [String: JSONValue] = [:]
     ) {
         self.thinkingConfig = thinkingConfig
         self.toolConfig = toolConfig
+        self.mediaResolution = mediaResolution
         self.serverTools = serverTools
         self.extraBody = extraBody
     }
@@ -252,8 +287,14 @@ public actor GeminiProvider: AIProvider, TextGenerator {
         if let options: GeminiOptions = config[custom: GeminiProvider.self] {
             if let thinkingConfig = options.thinkingConfig {
                 generationConfig["thinkingConfig"] = thinkingConfig.mapValues(\.anyValue)
-                body["generationConfig"] = generationConfig
             }
+            if let mediaResolution = options.mediaResolution {
+                generationConfig["mediaResolution"] = mediaResolution.rawValue
+            }
+            // Re-assigned once, after every field above: `generationConfig` was copied into `body`
+            // before this block, so a mutation left inside one of the branches would be dropped
+            // whenever that branch did not run.
+            body["generationConfig"] = generationConfig
             if let toolConfig = options.toolConfig {
                 body["toolConfig"] = toolConfig.mapValues(\.anyValue)
             }
