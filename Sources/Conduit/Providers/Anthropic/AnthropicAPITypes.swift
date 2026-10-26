@@ -434,7 +434,11 @@ internal struct AnthropicMessagesRequest: Codable, Sendable {
             let name: String?
 
             /// The tool input payload (for tool_use parts).
-            let input: GeneratedContent?
+            ///
+            /// Stored as plain JSON rather than `GeneratedContent`: the latter's `Codable`
+            /// form is Conduit's internal `{"kind": {...}, "orderedKeys": [...]}` tree, which
+            /// the model reads back as malformed arguments and answers by repeating the call.
+            let input: AnyCodable?
 
             /// The tool use ID (for tool_result parts).
             let toolUseId: String?
@@ -465,7 +469,7 @@ internal struct AnthropicMessagesRequest: Codable, Sendable {
                 source: ImageSource?,
                 id: String? = nil,
                 name: String? = nil,
-                input: GeneratedContent? = nil,
+                input: AnyCodable? = nil,
                 toolUseId: String? = nil,
                 content: String? = nil,
                 isError: Bool? = nil
