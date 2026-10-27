@@ -139,7 +139,7 @@ extension AnthropicProvider {
                             source: nil,
                             id: call.id,
                             name: call.toolName,
-                            input: call.arguments
+                            input: toolUseInput(for: call)
                         ))
                     }
 
@@ -299,6 +299,30 @@ extension AnthropicProvider {
         guard model.provider == .anthropic else {
             throw AIError.invalidInput("AnthropicProvider only supports Anthropic model identifiers")
         }
+    }
+
+    /// Converts a prior tool call's arguments into the plain JSON object Anthropic expects
+    /// as a `tool_use` block's `input`.
+    ///
+    /// Encoding `GeneratedContent` directly would emit its internal
+    /// `{"kind": {...}, "orderedKeys": [...]}` tree, so the model would see its own earlier
+    /// calls as malformed and repeat them. Round-tripping through the arguments' JSON string
+    /// gives back exactly the object the model originally sent.
+    ///
+    /// Anthropic rejects a `tool_use` whose `input` is not an object, and the rejected call
+    /// would stay in history and fail every later turn. Arguments that are not valid JSON, or
+    /// decode to anything other than an object (possible for hand-built tool calls, since
+    /// `jsonString` allows fragments), are sent as an empty object instead.
+    private nonisolated func toolUseInput(for call: Transcript.ToolCall) -> AnyCodable {
+        let decoded = try? JSONDecoder().decode(AnyCodable.self, from: call.argumentsData())
+        if let decoded, case .object = decoded.value {
+            return decoded
+        }
+        logger.warning("Sending empty tool_use input: arguments are not a JSON object", metadata: [
+            "toolCallId": .string(call.id),
+            "toolName": .string(call.toolName)
+        ])
+        return AnyCodable(value: .object([:]))
     }
 
     /// Appends deterministic structured-output instructions for response format.
